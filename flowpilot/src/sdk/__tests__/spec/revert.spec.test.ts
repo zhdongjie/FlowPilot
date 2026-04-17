@@ -5,11 +5,6 @@ import { FlowEngine } from "../../core/engine";
 import type {Step} from "../../types";
 
 describe("FlowEngine Spec - Revert Semantics (v1.5)", () => {
-    const s = (key: string): any => ({
-        id: `sig_${key}_${Math.random()}`,
-        key,
-        timestamp: Date.now()
-    });
 
     const steps: Step[] = [
         { id: "1", when: { type: "event", key: "a" }, next: ["2"] },
@@ -18,17 +13,23 @@ describe("FlowEngine Spec - Revert Semantics (v1.5)", () => {
     ];
 
     it("REVERT: 应该基于 stepId 重置状态并正确重算", () => {
+
         const engine = new FlowEngine(steps, "1");
-        engine.ingest(s("a"));
-        engine.ingest(s("b"));
 
-        expect(engine.getActiveSteps()).toContain("3");
+        // 模拟两个信号
+        engine.ingest({ id: "s1", key: "a", timestamp: 100 });
+        engine.ingest({ id: "s2", key: "b", timestamp: 200 });
 
-        // 回滚到步骤 1
-        // 注意：新版 revert(stepId) 会清空该步骤之后的事件并重算
+        expect(engine.getCompletedSteps()).toContain("2");
+
+        // 动作：回退到步骤 1
+        // 语义：回到步骤 1 刚刚完成的时刻（100ms）
         engine.revert("1");
 
-        expect(engine.getCompletedSteps()).toContain("1");
-        expect(engine.getActiveSteps()).toContain("2");
+        // ✅ 修正断言 1：步骤 1 应该是已完成状态
+        expect(engine.getCompletedSteps()).toEqual(["1"]);
+
+        // ✅ 修正断言 2：步骤 2 应该是当前活跃状态（等待 b 信号）
+        expect(engine.getActiveSteps()).toEqual(["2"]);
     });
 });

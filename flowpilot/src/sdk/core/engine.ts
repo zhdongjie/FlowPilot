@@ -12,6 +12,7 @@ export class FlowEngine {
 
     // 👉 Phase 1: 记录每个步骤的激活时间，支撑 Temporal 逻辑
     private readonly activatedAt = new Map<string, number>();
+    private readonly completedAt = new Map<string, number>();
 
     private readonly activeSteps = new Set<string>();
     private readonly completedSteps = new Set<string>();
@@ -61,6 +62,7 @@ export class FlowEngine {
         this.completedSteps.clear();
         this.factMap.clear();
         this.activatedAt.clear();
+        this.completedAt.clear();
         if (this.rootStepId) {
             // 初始化时赋予基准时间 0，确保 Replay 的绝对确定性
             this.activateStep(this.rootStepId, 0);
@@ -92,13 +94,16 @@ export class FlowEngine {
     // INGEST (幂等对齐)
     // -------------------------
     ingest(signal: Signal) {
+        if (signal.timestamp == null) {
+            throw new Error("[FlowPilot Engine] Critical: Signal must have a timestamp to guarantee determinism.");
+        }
         // 核心：若 store 拦截了重复信号，直接短路返回
         const inserted = this.store.push(signal);
         if (!inserted) return;
 
         this.updateFact(signal);
         // 将当前驱动引擎的信号时间戳传入，作为下一步激活的基准线
-        this.evaluateLoop(signal.timestamp ?? Date.now());
+        this.evaluateLoop(signal.timestamp);
     }
 
     private updateFact(signal: Signal) {
@@ -130,6 +135,8 @@ export class FlowEngine {
                 if (this.evaluate(step.when, stepId)) {
                     this.completedSteps.add(stepId);
                     this.activeSteps.delete(stepId);
+
+                    this.completedAt.set(stepId, currentEventTs);
 
                     step.next?.forEach(nextId => {
                         // 防止并发分支导致的重复激活
@@ -183,8 +190,7 @@ export class FlowEngine {
 
     private replay(events: Signal[]) {
         this.resetState();
-        const sorted = [...events].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
-
+        const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
         for (const e of sorted) {
             // 纯净状态下手动推进，不触发无用副作用
             this.store.push(e);
@@ -193,21 +199,27 @@ export class FlowEngine {
         }
     }
 
-    revert(targetStepId: string) {
+    /**
+     * 底层能力：回溯到指定的绝对时间点
+     * 语义：抹除 targetTs 之后发生的所有“未来事件”
+     */
+    revertToTime(targetTs: number) {
         const events = [...this.store.getEvents()];
-        const newStoreEvents: Signal[] = [];
 
-        // 使用影子引擎进行推演截断
-        const shadow = new FlowEngine([...this.stepsMap.values()], this.rootStepId);
-
-        for (const e of events) {
-            newStoreEvents.push(e);
-            shadow.ingest(e);
-            if (shadow.getCompletedSteps().includes(targetStepId)) break;
-        }
+        const validEvents = events.filter(e => e.timestamp <= targetTs);
 
         this.store.clear();
-        newStoreEvents.forEach(e => this.store.push(e));
-        this.recompute();
+        this.replay(validEvents);
+    }
+
+    revert(targetStepId: string) {
+        const targetTs = this.completedAt.get(targetStepId);
+
+        if (targetTs === undefined) {
+            throw new Error(`[FlowPilot Engine] Cannot revert. Step '${targetStepId}' is not in the current timeline history.`);
+        }
+
+        // 2. 直接调用底层的时间切片方法进行绝对回滚
+        this.revertToTime(targetTs);
     }
 }
