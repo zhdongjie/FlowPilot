@@ -1,7 +1,7 @@
 // src/sdk/types/step.ts
 
 export type Condition =
-    | { type: "event"; key: string }
+    | { type: "event"; key: string; afterStep?: string }
     | { type: "and"; conditions: Condition[] }
     | { type: "or"; conditions: Condition[] };
 

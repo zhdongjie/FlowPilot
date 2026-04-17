@@ -4,7 +4,7 @@ import { describe, it, expect } from "vitest";
 import { FlowEngine } from "../../core/engine";
 import type { Step } from "../../types";
 
-describe("FlowEngine Spec - Bootstrap (v1.5 DAG)", () => {
+describe("FlowEngine Spec - Bootstrap (v1.6.1 Production Grade)", () => {
 
     it("should initialize at first step", () => {
         // 1. 适配新版 Step 结构：使用 when 条件对象
@@ -31,11 +31,12 @@ describe("FlowEngine Spec - Bootstrap (v1.5 DAG)", () => {
             { id: "1", when: { type: "event", key: "a" } }
         ];
 
-        // 测试异常路径：传入一个不存在的 rootId
-        const engine = new FlowEngine(steps, "non-existent-id");
 
-        expect(engine.getActiveSteps()).not.toContain("1");
-        expect(engine.getActiveSteps()).toContain("non-existent-id");
+        // 在 v1.6.1 中，引擎会在实例化瞬间进行 DFS 拓扑校验。
+        // 遇到不存在的 ID，直接抛出 Dangling reference 异常 (Fail Fast)。
+        expect(() => {
+            new FlowEngine(steps, "non-existent-id");
+        }).toThrow(/Dangling reference/);
     });
 
 });
