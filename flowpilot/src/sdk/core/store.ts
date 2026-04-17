@@ -4,7 +4,7 @@ import type { Signal } from "../types";
 
 export class SignalStore {
     private events: Signal[] = [];
-    private seen = new Set<string>();
+    private readonly seen = new Set<string>();
 
     push(signal: Signal) {
         if (this.seen.has(signal.id)) return;

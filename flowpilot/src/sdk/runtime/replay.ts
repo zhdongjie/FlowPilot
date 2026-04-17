@@ -17,7 +17,7 @@ export class FlowReplayer {
     static replay(
         steps: Step[],
         signals: Signal[],
-        rootStepId: string // ✅ 显式要求起点
+        rootStepId: string
     ): ReplayResult {
         const engine = new FlowEngine(structuredClone(steps), rootStepId);
         const trace = new TraceStore();
