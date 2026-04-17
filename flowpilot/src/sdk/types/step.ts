@@ -1,9 +1,7 @@
 // src/sdk/types/step.ts
 
-export type Condition =
-    | { type: "event"; key: string; afterStep?: string }
-    | { type: "and"; conditions: Condition[] }
-    | { type: "or"; conditions: Condition[] };
+import type { Condition } from "./condition";
+
 
 export interface Step {
     id: string;
