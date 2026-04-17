@@ -14,6 +14,8 @@ export class FlowEngine {
     private readonly activatedAt = new Map<string, number>();
     private readonly completedAt = new Map<string, number>();
 
+    private readonly eventIndex = new Map<string, number[]>();
+
     private readonly activeSteps = new Set<string>();
     private readonly completedSteps = new Set<string>();
     private readonly rootStepId: string;
@@ -63,6 +65,7 @@ export class FlowEngine {
         this.factMap.clear();
         this.activatedAt.clear();
         this.completedAt.clear();
+        this.eventIndex.clear();
         if (this.rootStepId) {
             // 初始化时赋予基准时间 0，确保 Replay 的绝对确定性
             this.activateStep(this.rootStepId, 0);
@@ -109,6 +112,64 @@ export class FlowEngine {
     private updateFact(signal: Signal) {
         const count = this.factMap.get(signal.key) || 0;
         this.factMap.set(signal.key, count + 1);
+
+        this.updateIndex(signal);
+    }
+
+
+
+    private updateIndex(signal: Signal) {
+        let list = this.eventIndex.get(signal.key);
+        if (!list) {
+            list = [];
+            this.eventIndex.set(signal.key, list);
+        }
+
+        const ts = signal.timestamp;
+
+        const len = list.length;
+        if (len === 0 || list[len - 1] <= ts) {
+            list.push(ts);
+            return;
+        }
+
+        let i = list.length - 1;
+        // 从尾部往前找插入点
+        while (i >= 0 && list[i] > ts) {
+            i--;
+        }
+
+        list.splice(i + 1, 0, ts);
+    }
+
+
+    /**
+     * 使用二分查找寻找第一个 >= cutoff 的时间戳
+     */
+    private hasEventAfter(key: string, cutoff: number): boolean {
+        const list = this.eventIndex.get(key);
+        if (!list || list.length === 0) return false;
+
+        let l = 0;
+        let r = list.length - 1;
+
+        // O(1) 极速短路优化：
+        // 1. 如果最大的时间戳都比 cutoff 小，绝对没有
+        if (list[r] < cutoff) return false;
+        // 2. 如果最小的时间戳都 >= cutoff，绝对有
+        if (list[0] >= cutoff) return true;
+
+        // 二分查找
+        while (l <= r) {
+            const mid = (l + r) >> 1;
+            if (list[mid] >= cutoff) {
+                r = mid - 1; // 尝试往左找更早的
+            } else {
+                l = mid + 1;
+            }
+        }
+
+        return l < list.length;
     }
 
     // -------------------------
@@ -165,10 +226,8 @@ export class FlowEngine {
                 const referenceStepId = cond.afterStep || currentStepId;
                 const cutoff = this.activatedAt.get(referenceStepId) ?? 0;
 
-                // O(n) Fallback 遍历：确保该事实发生在基准线之后
-                return this.store.getEvents().some(
-                    e => e.key === cond.key && (e.timestamp ?? 0) >= cutoff
-                );
+                // O(log n) 二分查找：确保该事实发生在基准线之后
+                return this.hasEventAfter(cond.key, cutoff);
             }
             case "and":
                 return cond.conditions.every(c => this.evaluate(c, currentStepId));
