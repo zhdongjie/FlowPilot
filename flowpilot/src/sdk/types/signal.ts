@@ -10,4 +10,6 @@ export interface Signal {
     type?: SignalType;
 
     timestamp: number;
+
+    payload?: any; // 👉 支持业务自定义数据
 }

@@ -1,5 +1,7 @@
 // src/sdk/types/condition.ts
 
+export type ConditionType = "event" | "and" | "or" | "sequence";
+
 export interface EventCondition {
     type: "event";
     key: string;
@@ -27,6 +29,20 @@ export interface SequenceCondition {
     // DSL 扩展参数
     within?: number;        // 整个序列必须在基准时间后的 N ms 内完成
     afterStep?: string;     // 时间锚点覆盖
+}
+
+export interface DiagnosticNode {
+    type: ConditionType;
+    passed: boolean;
+    reason?: string;
+    details?: {
+        current?: number;
+        required?: number;
+        elapsed?: number;
+        limit?: number;
+        [key: string]: any;
+    };
+    children?: DiagnosticNode[];
 }
 
 // 暴露出最终的联合类型
