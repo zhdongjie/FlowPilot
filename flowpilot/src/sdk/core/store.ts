@@ -13,4 +13,8 @@ export class SignalStore {
         return this.events;
     }
 
+    clear() {
+        this.events = [];
+    }
+
 }

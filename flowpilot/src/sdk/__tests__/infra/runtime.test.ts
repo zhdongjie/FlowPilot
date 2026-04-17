@@ -37,7 +37,7 @@ describe("Runtime Layer", () => {
 
         expect(engine.currentStep?.id).toBe("2");
 
-        engine.ingest(sig("c", 2));
+        engine.ingest(sig("b", 2));
 
         expect(engine.currentStep?.id).toBe("3");
     });

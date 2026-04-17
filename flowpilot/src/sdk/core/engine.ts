@@ -1,6 +1,9 @@
-import { SignalStore } from "./store";
-import type { Step } from "../types/step";
-import type { Signal } from "../types/signal";
+// src/sdk/core/engine.ts
+
+import {SignalStore} from "./store";
+import {Projection} from "./projection";
+import type {Step} from "../types/step";
+import type {Signal} from "../types/signal";
 
 export class FlowEngine {
     steps: Step[];
@@ -12,6 +15,10 @@ export class FlowEngine {
 
     constructor(steps: Step[]) {
         this.steps = steps;
+        this.resetState();
+    }
+
+    private resetState() {
         this.state.currentIndex = 0;
     }
 
@@ -31,73 +38,89 @@ export class FlowEngine {
     }
 
     // -------------------------
-    // INGEST (唯一入口)
+    // INGEST
     // -------------------------
     ingest(signal: Signal) {
         this.store.push(signal);
-
-        // 只做一步推进（关键修复点）
         this.tryAdvance(signal);
     }
 
     // -------------------------
-    // CORE TRANSITION (FIXED)
+    // CORE TRANSITION (纯 FSM 模式)
     // -------------------------
     private tryAdvance(signal: Signal) {
         const step = this.currentStep;
         if (!step) return;
 
-        if (this.matches(signal, step)) {
-            this.state.currentIndex++;
+        // 👉 核心修复：纯语义匹配，不再进行严格的时间校验
+        if (signal.key === step.complete) {
+            this.advance();
+        }
+    }
+
+    private advance() {
+        // 防止指针溢出
+        if (this.state.currentIndex >= this.steps.length - 1) {
+            return;
+        }
+
+        this.state.currentIndex++;
+        const nextStep = this.currentStep;
+
+        if (nextStep) {
+            if (Projection.hasFact(this.store.getEvents(), nextStep.complete)) {
+                this.advance();
+            }
         }
     }
 
     // -------------------------
-    // RECOMPUTE (PURE)
+    // RECOMPUTE & REVERT
     // -------------------------
     recompute() {
-        this.state.currentIndex = 0;
+        this.resetState();
 
         const events = this.store.getEvents();
 
-        for (const e of events) {
-            const step = this.currentStep;
-            if (!step) break;
+        const sorted = [...events].sort((a, b) => {
+            return (a.timestamp ?? 0) - (b.timestamp ?? 0);
+        });
 
-            if (this.matches(e, step)) {
-                this.state.currentIndex++;
-            }
+        for (const e of sorted) {
+            this.tryAdvance(e);
         }
     }
 
-    // -------------------------
-    // REVERT (FIXED)
-    // -------------------------
     revert(index: number) {
-        const safeIndex = Math.max(0, Math.min(index, this.steps.length));
+        const safeIndex = Math.max(0, Math.min(index, this.steps.length - 1));
 
-        this.state.currentIndex = 0;
-        const events = this.store.getEvents();
+        const events = [...this.store.getEvents()];
 
-        // replay only up to index
+        const truncated = this.truncateEventsForStep(events, safeIndex);
+
+        this.store.clear();
+        truncated.forEach((e: Signal) => this.store.push(e));
+
+        this.recompute();
+    }
+
+    private truncateEventsForStep(events: Signal[], targetStep: number): Signal[] {
+        const result: Signal[] = [];
+        let stepIndex = 0;
+
         for (const e of events) {
-            const step = this.currentStep;
-            if (!step) break;
+            result.push(e);
 
-            if (this.matches(e, step)) {
-                this.state.currentIndex++;
+            const step = this.steps[stepIndex];
+            if (step && e.key === step.complete) {
+                stepIndex++;
             }
 
-            if (this.state.currentIndex >= safeIndex) {
+            if (stepIndex >= targetStep) {
                 break;
             }
         }
-    }
 
-    // -------------------------
-    // MATCH RULE
-    // -------------------------
-    private matches(signal: Signal, step: Step): boolean {
-        return signal.key === step.id;
+        return result;
     }
 }
