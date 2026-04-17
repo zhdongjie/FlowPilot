@@ -1,473 +1,377 @@
-# 🧠 FlowPilot SDK 实现路线
+# 🚀 FlowPilot SDK 实现路线（v1.6+ 实战版）
 
-------
+---
 
-# 🚀 Phase 0：项目初始化（环境地基）
-
-## 🎯 目标
-
-建立 Vue + TS + Vitest 的干净工程骨架
-
-------
-
-## 🧱 执行步骤
-
-```bash
-npm create vite@latest flowpilot -- --template vue-ts
-cd flowpilot
-npm install
-npm install -D vitest
-```
-
-------
-
-## 📁 目录结构（初始）
-
-```
-src/
-  sdk/
-  tests/
-```
-
-------
-
-## ✅ 成果
-
-- Vue 项目可以正常启动
-- TypeScript 无报错
-- Vitest 可以运行
-
-------
-
-## 🧪 验证
-
-```bash
-npm run dev
-npm run test
-```
-
-✔ 都能跑通
-
-------
-
-# 🚀 Phase 1：测试体系建立（强制）
+# 🧱 Phase 0：基础工程（地基）
 
 ## 🎯 目标
 
-让 SDK 未来所有逻辑**必须可测试**
+项目可运行 + 测试体系存在
 
-------
+## 状态
 
-## 🧱 执行
+👉 ✅ **已完成**
 
-创建：
+你已经有：
 
-```
-src/sdk/core/__tests__/bootstrap.test.ts
-```
+* Vitest
+* killer tests
+* 工程结构
 
-------
+---
 
-## 🧪 测试内容
-
-```ts
-import { describe, it, expect } from "vitest";
-
-describe("bootstrap", () => {
-  it("should run test system", () => {
-    expect(1 + 1).toBe(2);
-  });
-});
-```
-
-------
-
-## ✅ 成果
-
-- vitest 正常运行
-- 测试结构存在
-
-------
-
-## ❌ 失败标准
-
-- 没有测试目录 = 停止
-
-------
-
-# 🚀 Phase 2：Signal 最小模型
+# 🧠 Phase 1：Signal 模型（事件源）
 
 ## 🎯 目标
 
-建立 Signal 数据结构（不写逻辑）
+统一事件模型（唯一真相）
 
-------
+## 核心能力
 
-## 📁 文件
+* append-only
+* 不可变
+* timestamp 驱动
 
-```
-src/sdk/types/signal.ts
-```
+## 状态
 
-------
+👉 ✅ **已完成（而且超标）**
 
-## 🧱 内容
+你已经有：
 
-```ts
-export type SignalType = "interaction" | "navigation" | "custom";
+* id（幂等）
+* timestamp（强约束）
+* SignalStore（去重）
 
-export type SignalMode = "event" | "fact";
+---
 
-export interface Signal {
-  key: string;
-  type: SignalType;
-  mode: SignalMode;
-  timestamp: number;
-}
-```
-
-------
-
-## 🧪 验证
-
-写类型测试（可选）：
-
-```ts
-const s: Signal = {
-  key: "ui.login.submit",
-  type: "interaction",
-  mode: "event",
-  timestamp: Date.now()
-};
-```
-
-------
-
-## ✅ 成果
-
-- 类型系统通过
-- 无 runtime 逻辑
-
-------
-
-# 🚀 Phase 3：Store（最小状态层）
+# 🧱 Phase 2：Store（事件存储 + 幂等）
 
 ## 🎯 目标
 
-实现 event + fact 存储
+构建可靠事件日志
 
-------
+## 核心能力
 
-## 📁 文件
+* 去重（id）
+* 顺序存储
+* replay 支持
 
-```
-src/sdk/core/store.ts
-```
+## 状态
 
-------
+👉 ✅ **已完成**
 
-## 🧱 实现
-
-```ts
-import { Signal } from "../types/signal";
-
-export class SignalStore {
-  events: Signal[] = [];
-  facts: Set<string> = new Set();
-
-  pushEvent(signal: Signal) {
-    this.events.push(signal);
-  }
-
-  pushFact(key: string) {
-    this.facts.add(key);
-  }
-}
-```
-
-------
-
-## 🧪 测试
+甚至你做了：
 
 ```ts
-it("stores facts uniquely", () => {
-  const store = new SignalStore();
-
-  store.pushFact("login.success");
-  store.pushFact("login.success");
-
-  expect(store.facts.size).toBe(1);
-});
+seen Set
 ```
 
-------
+👉 工业级做法
 
-## ✅ 成果
+---
 
-- Event 有序
-- Fact 去重
-
-------
-
-# 🚀 Phase 4：Signal Ingest（统一入口）
+# ⚙️ Phase 3：Engine Kernel（DAG + 并发）
 
 ## 🎯 目标
 
-建立唯一入口 `_ingest`
+从 FSM → DAG 引擎
 
-------
+## 核心能力
 
-## 📁 文件
+* activeSteps（并发）
+* completedSteps
+* DAG next
+* evaluateLoop 收敛
 
-```
-src/sdk/core/engine.ts
-```
+## 状态
 
-------
+👉 ✅ **已完成（核心突破）**
 
-## 🧱 实现（最小版）
+你已经：
 
-```ts
-import { Signal } from "../types/signal";
-import { SignalStore } from "./store";
+✔ 从 currentIndex → Set
+✔ 支持并发
+✔ 支持多分支
 
-export class FlowEngine {
-  store = new SignalStore();
+👉 这是架构级跨越
 
-  _ingest(signal: Signal) {
-    if (signal.mode === "event") {
-      this.store.pushEvent(signal);
-    }
+---
 
-    if (signal.mode === "fact") {
-      this.store.pushFact(signal.key);
-    }
-  }
-}
-```
-
-------
-
-## 🧪 验证
-
-```ts
-engine._ingest({
-  key: "ui.login.submit",
-  type: "interaction",
-  mode: "event",
-  timestamp: Date.now()
-});
-```
-
-✔ event 进入 store
-
-------
-
-## ❌ 失败标准
-
-- 直接操作 store ❌（禁止）
-
-------
-
-# 🚀 Phase 5：Step Engine（核心最小版）
+# 🧩 Phase 4：Condition System（AND / OR）
 
 ## 🎯 目标
 
-实现 step 推进
+支持复杂逻辑表达
 
-------
+## 核心能力
 
-## 📁 文件
+* event
+* and
+* or
 
-```
-src/sdk/core/engine.ts
-```
+## 状态
 
-------
+👉 ✅ **已完成**
 
-## 🧱 Step
+---
 
-```ts
-export interface Step {
-  id: string;
-  complete: string;
-  activatedAt?: number;
-}
-```
-
-------
-
-## 🧱 Engine（核心）
-
-```ts
-export class FlowEngine {
-  steps: Step[] = [];
-  currentIndex = 0;
-
-  store = new SignalStore();
-
-  get currentStep() {
-    return this.steps[this.currentIndex];
-  }
-
-  activateStep() {
-    this.currentStep.activatedAt = Date.now();
-  }
-}
-```
-
-------
-
-## 🧪 验证
-
-- step 能激活
-- currentStep 正确
-
-------
-
-# 🚀 Phase 6：匹配逻辑（Event）
+# ⏱ Phase 5：Temporal Model（时间语义）
 
 ## 🎯 目标
 
-实现 Event 时间过滤
+引入“局部时间线”
 
-------
+## 核心能力
 
-## 🧱 逻辑
+* activatedAt
+* cutoff
+* afterStep
+* 时间过滤
 
-```ts
-matchEvent(signal: Signal, step: Step) {
-  return (
-    signal.key === step.complete &&
-    signal.timestamp > step.activatedAt!
-  );
-}
+## 状态
+
+👉 🟡 **已完成 90%**
+
+你已经有：
+
+✔ activatedAt
+✔ afterStep
+✔ temporal evaluate
+
+---
+
+### ❗缺的点（重要）
+
+```text
+Temporal Index（性能）
 ```
 
-------
+你现在：
 
-## 🧪 测试
+```ts
+events.some(...)
+```
 
-- old event ❌
-- new event ✔
+👉 还是 O(n)
 
-------
+---
 
-# 🚀 Phase 7：Fact 补算机制
+# 🔁 Phase 6：Recompute（确定性重建）
 
 ## 🎯 目标
 
-Step 激活时自动检查 fact
+保证：
 
-------
-
-## 🧱 实现
-
-```ts
-checkFact(step: Step) {
-  if (this.store.facts.has(step.complete)) {
-    this.nextStep();
-  }
-}
+```text
+same events → same state
 ```
 
-------
+## 核心能力
 
-## 🧪 验证
+* sort by timestamp
+* replay
+* 无副作用
 
-- fact 存在 → 自动跳步
+## 状态
 
-------
+👉 ✅ **已完成**
 
-# 🚀 Phase 8：Revert（状态回滚）
+---
+
+# 🔙 Phase 7：Revert（时间回溯）
 
 ## 🎯 目标
 
-支持 step 回退
+真正的“时间切片”
 
-------
+## 核心能力
 
-## 🧱 实现
+* revertToTime
+* completedAt 作为锚点
+* 截断未来事件
 
-```ts
-revert(toIndex: number) {
-  this.currentIndex = toIndex;
-  this.activateStep();
-}
-```
+## 状态
 
-------
+👉 ✅ **已完成（你刚修复关键点）**
 
-## 🧪 验证
+✔ 用 completedAt（正确）
+✔ 时间切片（正确）
 
-- step 回退成功
-- activatedAt 更新
+👉 这一块已经是**正确语义实现**
 
-------
+---
 
-# 🚀 Phase 9：Vue 集成（桥接层）
+# 🛡 Phase 8：安全机制（防炸）
 
 ## 🎯 目标
 
-让 UI 响应 Engine
+防止错误配置炸系统
 
-------
+## 核心能力
 
-## 📁 文件
+* DAG 校验（cycle）
+* dangling 检测
+* loop guard
 
-```
-src/sdk/vue/useFlowPilot.ts
-```
+## 状态
 
-------
+👉 ✅ **已完成**
 
-## 🧱 实现
+---
 
-```ts
-import { ref } from "vue";
-import { FlowEngine } from "../core/engine";
-
-export function useFlowPilot(steps) {
-  const engine = new FlowEngine();
-  engine.steps = steps;
-
-  const currentStep = ref(engine.currentStep);
-
-  return {
-    engine,
-    currentStep
-  };
-}
-```
-
-------
-
-## 🧪 验证
-
-- Vue UI 能显示 step
-- step 变化 UI 更新
-
-------
-
-# 🚀 Phase 10（最终验证）：完整 Demo
+# 🧪 Phase 9：测试体系（Killer Tests）
 
 ## 🎯 目标
 
-跑通完整 Flow
+保证复杂行为不回归
 
-------
+## 核心能力
 
-## 页面结构：
+* DAG convergence
+* 幂等性
+* revert consistency
+* temporal correctness
 
-- step1 → 点击 → step2
-- step2 → fact → step3
-- revert → step2
+## 状态
 
-------
+👉 🟡 **已完成（很强，但还能再加）**
 
-## 成果：
+你已经有：
 
-✔ 无 if (step === x)
-✔ 全 signal 驱动
-✔ UI 完全解耦
+✔ convergence
+✔ idempotency
+✔ revert
+✔ temporal
 
+---
+
+### ❗还能补的（下一阶段）
+
+* 并发 + revert 组合测试
+* afterStep + revert 混合
+* 大规模事件压测
+
+---
+
+# 🚀 Phase 10：性能层（关键分水岭）
+
+## 🎯 目标
+
+从“能用” → “能扛业务”
+
+---
+
+## ❌ 当前状态
+
+👉 **未完成**
+
+---
+
+## 问题
+
+```ts
+store.getEvents().some(...)
+```
+
+👉 每次 evaluate 都是 O(n)
+
+---
+
+## 必须引入
+
+### Temporal Index
+
+```ts
+Map<string, Signal[]>
+```
+
+或：
+
+```ts
+Map<string, number[]> // timestamps
+```
+
+---
+
+## 目标
+
+```text
+O(n) → O(log n)
+```
+
+---
+
+# 🧠 Phase 11：Condition DSL（表达能力）
+
+## 🎯 目标
+
+让业务可以“写规则”，而不是写代码
+
+---
+
+## ❌ 当前状态
+
+👉 **未完成**
+
+---
+
+## 未来能力
+
+```ts
+count >= 3
+within 5s
+sequence A → B → C
+```
+
+---
+
+# 🔍 Phase 12：Debug / 可观测性
+
+## 🎯 目标
+
+让引擎“可解释”
+
+---
+
+## ❌ 当前状态
+
+👉 **未完成**
+
+---
+
+## 需要能力
+
+```ts
+whyStepCompleted(stepId)
+timeline()
+eventTrace()
+```
+
+---
+
+# 🖥 Phase 13：Vue Integration（UI 层）
+
+## 🎯 目标
+
+驱动 UI
+
+---
+
+## 状态
+
+👉 🟡 **初级完成，但不适配 DAG**
+
+你现在类似：
+
+```ts
+currentStep
+```
+
+---
+
+但你需要：
+
+```ts
+activeSteps[]
+completedSteps[]
+```
