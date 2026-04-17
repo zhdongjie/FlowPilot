@@ -10,7 +10,7 @@ export interface ReplayResult {
     engine: FlowEngine;
     trace: TraceStore;
     snapshot: {
-        stepId: string;
+        stepId: string | null;
         index: number;
     };
 }
@@ -58,7 +58,7 @@ export class FlowReplayer {
             engine,
             trace,
             snapshot: {
-                stepId: engine.currentStep?.id,
+                stepId: engine.currentStep?.id ?? null,
                 index: (engine as any).currentIndex
             }
         };

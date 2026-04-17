@@ -1,7 +1,6 @@
 // src/sdk/types/signal.ts
-export type SignalType = "interaction" | "navigation" | "custom";
 
-export type SignalMode = "event" | "fact";
+export type SignalType = "interaction" | "navigation" | "custom";
 
 export interface Signal {
     id: string;
@@ -9,8 +8,6 @@ export interface Signal {
     key: string;
 
     type: SignalType;
-
-    mode: SignalMode;
 
     timestamp: number;
 }

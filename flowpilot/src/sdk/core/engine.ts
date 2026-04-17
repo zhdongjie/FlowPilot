@@ -1,105 +1,103 @@
-// src/sdk/core/engine.ts
-
 import { SignalStore } from "./store";
-import { FlowResolver } from "./resolver";
 import type { Step } from "../types/step";
 import type { Signal } from "../types/signal";
 
 export class FlowEngine {
     steps: Step[];
-    currentIndex = 0;
-    store = new SignalStore();
+    private store = new SignalStore();
+
+    private state = {
+        currentIndex: 0
+    };
 
     constructor(steps: Step[]) {
-        this.steps = structuredClone(steps);
-        this.bootstrap();
+        this.steps = steps;
+        this.state.currentIndex = 0;
     }
 
     // -------------------------
-    // Bootstrap（纯计算）
+    // PUBLIC
     // -------------------------
-    private bootstrap() {
-        this.currentIndex = FlowResolver.resolve(
-            this.steps,
-            this.store,
-            0
-        );
-
-        this.activateStep();
+    get currentStep(): Step | undefined {
+        return this.steps[this.state.currentIndex];
     }
 
-    get currentStep() {
-        return this.steps[this.currentIndex];
+    get currentIndex() {
+        return this.state.currentIndex;
+    }
+
+    getEvents() {
+        return this.store.getEvents();
     }
 
     // -------------------------
-    // Input Layer
+    // INGEST (唯一入口)
     // -------------------------
     ingest(signal: Signal) {
         this.store.push(signal);
 
-        if (signal.mode === "event") {
-            this.handleEvent(signal);
-        }
-
-        if (signal.mode === "fact") {
-            this.recompute();
-        }
+        // 只做一步推进（关键修复点）
+        this.tryAdvance(signal);
     }
 
-    handleEvent(signal: Signal) {
+    // -------------------------
+    // CORE TRANSITION (FIXED)
+    // -------------------------
+    private tryAdvance(signal: Signal) {
         const step = this.currentStep;
-
         if (!step) return;
 
-        if (
-            signal.key === step.complete &&
-            signal.timestamp >= (step.activatedAt ?? 0)
-        ) {
-            this.currentIndex++;
-            this.recompute();
+        if (this.matches(signal, step)) {
+            this.state.currentIndex++;
         }
     }
 
     // -------------------------
-    // Core deterministic compute
+    // RECOMPUTE (PURE)
     // -------------------------
     recompute() {
-        const prev = this.currentIndex;
+        this.state.currentIndex = 0;
 
-        const next = FlowResolver.resolve(
-            this.steps,
-            this.store,
-            this.currentIndex
-        );
+        const events = this.store.getEvents();
 
-        const safe = Math.max(
-            0,
-            Math.min(next, this.steps.length - 1)
-        );
+        for (const e of events) {
+            const step = this.currentStep;
+            if (!step) break;
 
-        this.currentIndex = safe;
-
-        if (prev !== safe) {
-            this.activateStep();
+            if (this.matches(e, step)) {
+                this.state.currentIndex++;
+            }
         }
     }
 
     // -------------------------
-    // PURE activation (no Date.now)
+    // REVERT (FIXED)
     // -------------------------
-    activateStep() {
-        const step = this.currentStep;
-        if (!step) return;
+    revert(index: number) {
+        const safeIndex = Math.max(0, Math.min(index, this.steps.length));
 
-        step.activatedAt ??= this.store.lastTimestamp();
+        this.state.currentIndex = 0;
+        const events = this.store.getEvents();
+
+        // replay only up to index
+        for (const e of events) {
+            const step = this.currentStep;
+            if (!step) break;
+
+            if (this.matches(e, step)) {
+                this.state.currentIndex++;
+            }
+
+            if (this.state.currentIndex >= safeIndex) {
+                break;
+            }
+        }
     }
 
     // -------------------------
-    // revert
+    // MATCH RULE
     // -------------------------
-    revert(index: number) {
-        this.currentIndex = index;
-        this.recompute();
+    private matches(signal: Signal, step: Step): boolean {
+        return signal.key === step.id;
     }
 }

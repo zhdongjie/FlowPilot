@@ -3,30 +3,14 @@
 import type { Signal } from "../types/signal";
 
 export class SignalStore {
-    events: Signal[] = [];
-    facts: Set<string> = new Set();
+    private events: Signal[] = [];
 
     push(signal: Signal) {
-        if (signal.mode === "event") {
-            this.events.push(signal);
-        }
-
-        if (signal.mode === "fact") {
-            this.facts.add(signal.key);
-        }
+        this.events.push(signal);
     }
 
-    hasFact(key: string) {
-        return this.facts.has(key);
-    }
-
-    getEvents() {
+    getEvents(): Signal[] {
         return this.events;
     }
 
-    lastTimestamp(): number {
-        return this.events.length
-            ? this.events[this.events.length - 1].timestamp
-            : 0;
-    }
 }
