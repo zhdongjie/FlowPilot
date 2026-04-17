@@ -6,7 +6,6 @@ import type { Step, Condition, Signal } from "../types";
 export class FlowEngine {
     private readonly store = new SignalStore();
     private readonly stepsMap: Map<string, Step> = new Map();
-
     private readonly factMap = new Map<string, number>();
 
     private readonly activeSteps = new Set<string>();
@@ -47,13 +46,10 @@ export class FlowEngine {
     // INGEST
     // -------------------------
     ingest(signal: Signal) {
-        // 1. 存入 Store（内部已做幂等去重）
-        this.store.push(signal);
+        const inserted = this.store.push(signal);
+        if (!inserted) return;
 
-        // 2. 更新 FactMap 投影索引
         this.updateFact(signal);
-
-        // 3. 执行评估循环
         this.evaluateLoop();
     }
 
@@ -67,10 +63,19 @@ export class FlowEngine {
     // -------------------------
     private evaluateLoop() {
         let changed = true;
+        let guard = 0;
+        const MAX_LOOP = 1000;
 
         while (changed) {
+            if (++guard > MAX_LOOP) {
+                throw new Error("[FlowEngine] Critical: Infinite loop detected. Please check your DAG for circular dependencies.");
+            }
+
             changed = false;
-            for (const stepId of this.activeSteps) {
+
+            const currentActives = [...this.activeSteps];
+
+            for (const stepId of currentActives) {
                 const step = this.stepsMap.get(stepId);
                 if (!step) continue;
 
@@ -104,9 +109,9 @@ export class FlowEngine {
         }
     }
 
-    /**
-     * recompute 不再调用含有 store.push 的 ingest 方法。
-     */
+    // -------------------------
+    // RECOMPUTE & REVERT
+    // -------------------------
     recompute() {
         const events = [...this.store.getEvents()];
         this.store.clear();
@@ -115,6 +120,7 @@ export class FlowEngine {
 
     private replay(events: Signal[]) {
         this.resetState();
+        // 确保重放顺序具备确定性
         const sorted = [...events].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
 
         for (const e of sorted) {
@@ -128,11 +134,13 @@ export class FlowEngine {
         const events = [...this.store.getEvents()];
         const newStoreEvents: Signal[] = [];
 
+        // 影子引擎模拟
         const shadow = new FlowEngine([...this.stepsMap.values()], this.rootStepId);
 
         for (const e of events) {
             newStoreEvents.push(e);
             shadow.ingest(e);
+            // 语义：一旦影子引擎标记目标步骤已完成，立即截断
             if (shadow.getCompletedSteps().includes(targetStepId)) break;
         }
 
