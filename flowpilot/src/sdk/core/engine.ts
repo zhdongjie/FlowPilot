@@ -1,126 +1,173 @@
 // src/sdk/core/engine.ts
 
-import {SignalStore} from "./store";
-import {Projection} from "./projection";
-import type {Step} from "../types/step";
-import type {Signal} from "../types/signal";
+import { SignalStore } from "./store";
+import { Projection } from "./projection";
+// 👉 适配补全后的类型桶文件
+import type { Step, Condition, Signal } from "../types/index";
 
 export class FlowEngine {
-    steps: Step[];
     private store = new SignalStore();
 
-    private state = {
-        currentIndex: 0
-    };
+    // 将 Step 存储为 Map 以实现 O(1) 的快速 ID 检索
+    private steps: Map<string, Step> = new Map();
 
-    constructor(steps: Step[]) {
-        this.steps = steps;
+
+    // 核心状态：从 currentIndex 切换为并发集合
+    private activeSteps = new Set<string>();
+    private completedSteps = new Set<string>();
+
+    private rootStepId: string;
+
+    /**
+     * @param steps 步骤定义数组
+     * @param rootStepId 流程的起点 ID
+     */
+    constructor(steps: Step[], rootStepId: string) {
+        steps.forEach(s => this.steps.set(s.id, s));
+        this.rootStepId = rootStepId;
+
         this.resetState();
     }
 
     private resetState() {
-        this.state.currentIndex = 0;
+        this.activeSteps.clear();
+        this.completedSteps.clear();
+
+        // 按照 Spec v1.5，初始化时激活根步骤
+        this.activeSteps.add(this.rootStepId);
     }
 
     // -------------------------
-    // PUBLIC
+    // PUBLIC ACCESSORS
     // -------------------------
-    get currentStep(): Step | undefined {
-        return this.steps[this.state.currentIndex];
+
+    /** 获取当前所有活跃（待完成）的步骤 ID */
+    getActiveSteps(): string[] {
+        return [...this.activeSteps];
     }
 
-    get currentIndex() {
-        return this.state.currentIndex;
+    /** 获取所有已完成的步骤 ID */
+    getCompletedSteps(): string[] {
+        return [...this.completedSteps];
     }
 
-    getEvents() {
+    getEvents(): Signal[] {
         return this.store.getEvents();
     }
 
-    // -------------------------
-    // INGEST
-    // -------------------------
+    /**
+     * 接收并处理新信号
+     * 1. 存入具备幂等性的 SignalStore
+     * 2. 触发全局评估循环
+     */
     ingest(signal: Signal) {
         this.store.push(signal);
-        this.tryAdvance(signal);
+        this.evaluateLoop();
     }
 
-    // -------------------------
-    // CORE TRANSITION (纯 FSM 模式)
-    // -------------------------
-    private tryAdvance(signal: Signal) {
-        const step = this.currentStep;
-        if (!step) return;
+    /**
+     * 核心评估循环
+     * 只要有步骤完成并激活了后继节点，就持续循环，直到状态不再变化。
+     * 这确保了基于历史事实（Facts）的“自动跳步”逻辑。
+     */
+    private evaluateLoop() {
+        const events = this.store.getEvents();
+        let changed = true;
 
-        // 👉 核心修复：纯语义匹配，不再进行严格的时间校验
-        if (signal.key === step.complete) {
-            this.advance();
-        }
-    }
+        while (changed) {
+            changed = false;
 
-    private advance() {
-        // 防止指针溢出
-        if (this.state.currentIndex >= this.steps.length - 1) {
-            return;
-        }
+            // 使用副本进行迭代，防止在循环中修改集合导致问题
+            for (const stepId of [...this.activeSteps]) {
+                const step = this.steps.get(stepId);
+                if (!step) continue;
 
-        this.state.currentIndex++;
-        const nextStep = this.currentStep;
+                if (this.evaluate(step.when, events)) {
+                    this.completedSteps.add(stepId);
+                    this.activeSteps.delete(stepId);
 
-        if (nextStep) {
-            if (Projection.hasFact(this.store.getEvents(), nextStep.complete)) {
-                this.advance();
+                    // 激活该步骤指向的所有后继 DAG 节点
+                    step.next?.forEach(nextId => {
+                        if (!this.completedSteps.has(nextId)) {
+                            this.activeSteps.add(nextId);
+                        }
+                    });
+
+                    changed = true;
+                }
             }
         }
     }
 
-    // -------------------------
-    // RECOMPUTE & REVERT
-    // -------------------------
-    recompute() {
-        this.resetState();
+    /**
+     * 递归条件解析器
+     * 支持 event 匹配、AND 组合、OR 组合
+     */
+    private evaluate(cond: Condition, events: Signal[]): boolean {
+        switch (cond.type) {
+            case "event":
+                // 委托给 Projection 进行基础信号判定
+                return Projection.hasEvent(events, cond.key);
 
-        const events = this.store.getEvents();
+            case "and":
+                // 所有子条件必须全部满足
+                return cond.conditions.every(c => this.evaluate(c, events));
 
-        const sorted = [...events].sort((a, b) => {
-            return (a.timestamp ?? 0) - (b.timestamp ?? 0);
-        });
+            case "or":
+                // 任意子条件满足即可
+                return cond.conditions.some(c => this.evaluate(c, events));
 
-        for (const e of sorted) {
-            this.tryAdvance(e);
+            default:
+                return false;
         }
     }
 
-    revert(index: number) {
-        const safeIndex = Math.max(0, Math.min(index, this.steps.length - 1));
-
+    /**
+     * 确定性重算
+     * 按照时间戳对历史进行排序并重新推演状态。
+     */
+    recompute() {
+        // 1. 获取当前 Store 中的所有事件并创建副本
         const events = [...this.store.getEvents()];
 
-        const truncated = this.truncateEventsForStep(events, safeIndex);
-
+        // 2. 彻底重置引擎状态和 Store
         this.store.clear();
-        truncated.forEach((e: Signal) => this.store.push(e));
+        this.resetState();
 
-        this.recompute();
+        // 3. 严格按时间戳排序，确保推演结果的确定性
+        const sorted = events.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+
+        // 4. 通过 ingest 逐个注入，利用 evaluateLoop 自动推进状态
+        for (const e of sorted) {
+            this.ingest(e);
+        }
     }
 
-    private truncateEventsForStep(events: Signal[], targetStep: number): Signal[] {
-        const result: Signal[] = [];
-        let stepIndex = 0;
+    /**
+     * 回滚到指定步骤
+     * 使用影子引擎（Shadow Engine）模拟推演，找到达到目标状态所需的最小事件副本。
+     */
+    revert(targetStepId: string) {
+        const events = [...this.store.getEvents()];
+        const newStoreEvents: Signal[] = [];
+
+        const shadow = new FlowEngine(
+            [...this.steps.values()],
+            this.rootStepId
+        );
 
         for (const e of events) {
-            result.push(e);
+            newStoreEvents.push(e);
+            shadow.ingest(e);
 
-            const step = this.steps[stepIndex];
-            if (step && e.key === step.complete) {
-                stepIndex++;
-            }
-
-            if (stepIndex >= targetStep) {
+            if (shadow.getCompletedSteps().includes(targetStepId)) {
                 break;
             }
         }
 
-        return result;
+        // 5. 将截断后的信号集应用到当前引擎并重算
+        this.store.clear();
+        newStoreEvents.forEach(e => this.store.push(e));
+        this.recompute();
     }
 }

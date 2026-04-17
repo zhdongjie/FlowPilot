@@ -1,3 +1,5 @@
+// src/sdk/__tests__/infra/store.test.ts
+
 import { describe, it, expect } from "vitest";
 import { SignalStore } from "../../core/store";
 

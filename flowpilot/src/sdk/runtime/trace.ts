@@ -30,6 +30,7 @@ export interface TraceEvent {
     toStep?: string;
 
     meta?: Record<string, any>;
+    activeSteps?: string[];
 }
 
 /**

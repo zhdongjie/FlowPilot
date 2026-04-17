@@ -1,6 +1,6 @@
 // src/sdk/core/projection.ts
 
-import type { Signal } from "../types/signal";
+import type { Signal } from "../types";
 
 export class Projection {
 
@@ -73,5 +73,16 @@ export class Projection {
         step: any
     ): boolean {
         return signal.key === step.complete;
+    }
+
+    /**
+     * 判断事件流中是否存在特定 key 的信号
+     */
+    static hasEvent(events: Signal[], key: string): boolean {
+        // 采用倒序查找，因为目标信号通常出现在近期，效率更高
+        for (let i = events.length - 1; i >= 0; i--) {
+            if (events[i].key === key) return true;
+        }
+        return false;
     }
 }

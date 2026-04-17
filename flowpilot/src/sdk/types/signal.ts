@@ -7,7 +7,7 @@ export interface Signal {
 
     key: string;
 
-    type: SignalType;
+    type?: SignalType;
 
     timestamp: number;
 }

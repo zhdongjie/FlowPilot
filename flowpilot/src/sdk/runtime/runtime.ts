@@ -4,8 +4,7 @@ import { FlowEngine } from "../core/engine";
 import { TraceStore } from "./trace";
 import { FlowReplayer } from "./replay";
 
-import type { Step } from "../types/step";
-import type { Signal } from "../types/signal";
+import type { Step, Signal } from "../types";
 
 export interface RuntimeOptions {
     steps: Step[];
