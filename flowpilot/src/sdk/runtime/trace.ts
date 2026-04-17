@@ -1,5 +1,12 @@
 // src/sdk/runtime/trace.ts
 
+/**
+ * 规则：
+ * - 只记录，不参与计算
+ * - 不影响 engine state
+ * - 不做任何“推导”
+ */
+
 export type TraceEventType =
     | "ENGINE_INIT"
     | "SIGNAL_INGEST"
@@ -26,15 +33,24 @@ export interface TraceEvent {
 }
 
 /**
- * 🧠 唯一真相源：事件因果记录器
+ * 设计目标：
+ * - 可回放
+ * - 可追踪因果链
+ * - 可用于 debug / UI / audit
  */
 export class TraceStore {
     private logs: TraceEvent[] = [];
 
+    // -----------------------------
+    // write
+    // -----------------------------
     record(event: TraceEvent) {
         this.logs.push(event);
     }
 
+    // -----------------------------
+    // read
+    // -----------------------------
     all(): TraceEvent[] {
         return this.logs;
     }
@@ -43,7 +59,10 @@ export class TraceStore {
         this.logs = [];
     }
 
-    getStepTimeline(stepId: string) {
+    // -----------------------------
+    // query: step timeline
+    // -----------------------------
+    getStepTimeline(stepId: string): TraceEvent[] {
         return this.logs.filter(e =>
             e.stepId === stepId ||
             e.fromStep === stepId ||
@@ -51,16 +70,42 @@ export class TraceStore {
         );
     }
 
-    getCausalChain(signalId: string) {
+    // -----------------------------
+    // query: signal causal chain
+    // -----------------------------
+    getCausalChain(signalId: string): TraceEvent[] {
         return this.logs.filter(e => e.signalId === signalId);
     }
 
-    timeline() {
+    // -----------------------------
+    // debug: simplified timeline
+    // -----------------------------
+    timeline(): Array<{
+        type: TraceEventType;
+        step?: string;
+        key?: string;
+        time: number;
+    }> {
         return this.logs.map(e => ({
-            t: e.type,
+            type: e.type,
             step: e.stepId,
             key: e.key,
             time: e.timestamp
         }));
+    }
+
+    // -----------------------------
+    // future extension hook
+    // -----------------------------
+    groupByStep(): Record<string, TraceEvent[]> {
+        const map: Record<string, TraceEvent[]> = {};
+
+        for (const e of this.logs) {
+            const key = e.stepId ?? "__global__";
+            if (!map[key]) map[key] = [];
+            map[key].push(e);
+        }
+
+        return map;
     }
 }

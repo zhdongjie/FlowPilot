@@ -16,7 +16,8 @@ export interface ReplayResult {
 }
 
 /**
- * 🔥 Pure Deterministic Replayer
+ * Deterministic Replay Engine
+ * 只做一件事：重建状态
  */
 export class FlowReplayer {
 
@@ -37,13 +38,12 @@ export class FlowReplayer {
 
         for (const signal of sorted) {
 
-            // ❗只记录输入，不伪造状态变化
             trace.record({
                 type: "SIGNAL_INGEST",
                 timestamp: signal.timestamp,
                 signalId: signal.id,
                 key: signal.key,
-                stepId: engine.currentStep.id
+                stepId: engine.currentStep?.id
             });
 
             engine.ingest(signal);
@@ -58,7 +58,7 @@ export class FlowReplayer {
             engine,
             trace,
             snapshot: {
-                stepId: engine.currentStep.id,
+                stepId: engine.currentStep?.id,
                 index: (engine as any).currentIndex
             }
         };

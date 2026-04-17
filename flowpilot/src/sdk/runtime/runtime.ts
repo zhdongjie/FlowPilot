@@ -6,13 +6,15 @@ import { FlowReplayer } from "./replay";
 
 import type { Step } from "../types/step";
 import type { Signal } from "../types/signal";
-import type { TraceEvent } from "./trace";
 
 export interface RuntimeOptions {
     steps: Step[];
     enableTrace?: boolean;
 }
 
+/**
+ * Runtime = 唯一对外入口
+ */
 export class FlowRuntime {
     private engine: FlowEngine;
     private trace?: TraceStore;
@@ -27,25 +29,25 @@ export class FlowRuntime {
         this.log({
             type: "ENGINE_INIT",
             timestamp: Date.now(),
-            stepId: this.engine.currentStep.id
+            stepId: this.engine.currentStep?.id
         });
     }
 
     ingest(signal: Signal) {
-
-        const before = this.engine.currentStep.id;
 
         this.log({
             type: "SIGNAL_INGEST",
             timestamp: Date.now(),
             signalId: signal.id,
             key: signal.key,
-            stepId: before
+            stepId: this.engine.currentStep?.id
         });
+
+        const before = this.engine.currentStep?.id;
 
         this.engine.ingest(signal);
 
-        const after = this.engine.currentStep.id;
+        const after = this.engine.currentStep?.id;
 
         if (before !== after) {
             this.log({
@@ -58,16 +60,12 @@ export class FlowRuntime {
         }
     }
 
-    get currentStep() {
-        return this.engine.currentStep;
-    }
-
     revert(index: number) {
-        const before = this.engine.currentStep.id;
+        const before = this.engine.currentStep?.id;
 
         this.engine.revert(index);
 
-        const after = this.engine.currentStep.id;
+        const after = this.engine.currentStep?.id;
 
         this.log({
             type: "REVERT",
@@ -82,6 +80,10 @@ export class FlowRuntime {
         return FlowReplayer.replay(this.engine.steps, signals);
     }
 
+    get currentStep() {
+        return this.engine.currentStep;
+    }
+
     debug() {
         return {
             currentStep: this.engine.currentStep,
@@ -90,7 +92,7 @@ export class FlowRuntime {
         };
     }
 
-    private log(event: TraceEvent) {
+    private log(event: any) {
         this.trace?.record(event);
     }
 }

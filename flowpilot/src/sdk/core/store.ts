@@ -23,4 +23,10 @@ export class SignalStore {
     getEvents() {
         return this.events;
     }
+
+    lastTimestamp(): number {
+        return this.events.length
+            ? this.events[this.events.length - 1].timestamp
+            : 0;
+    }
 }
