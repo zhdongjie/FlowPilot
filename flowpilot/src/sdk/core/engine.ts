@@ -2,10 +2,19 @@
 
 import { SignalStore } from "./store";
 import { TraceStore } from "../runtime/trace";
-import type { Condition, DiagnosticNode, EvalContext, EventCondition, SequenceCondition, Signal, Step } from "../types";
+import type {
+    Condition,
+    DiagnosticNode,
+    EvalContext,
+    EventCondition,
+    ParsedStep,
+    SequenceCondition,
+    Signal,
+    Step
+} from "../types";
 import { FlowParser } from "../compiler/parser";
 import { ConditionCompiler } from "../compiler/condition";
-import {TimerScheduler} from "../runtime/scheduler.ts";
+import { TimerScheduler } from "../runtime/scheduler.ts";
 
 export interface IndexedEvent {
     ts: number;
@@ -15,7 +24,7 @@ export interface IndexedEvent {
 export class FlowEngine {
     private readonly store = new SignalStore();
     private readonly trace = new TraceStore();
-    private readonly stepsMap: Map<string, Step> = new Map();
+    private readonly stepsMap: Map<string, ParsedStep> = new Map();
 
     // O(1) 的全局事实索引
     private readonly factMap = new Map<string, number>();
@@ -79,8 +88,8 @@ export class FlowEngine {
     /**
      * 将用户写的 DSL 字符串转换为标准 AST
      */
-    private preprocessStep(step: any): Step {
-        const processed = {...step};
+    private preprocessStep(step: any): ParsedStep {
+        const processed = { ...step };
         if (typeof processed.when === 'string') {
             processed.when = FlowParser.parse(processed.when);
         }
@@ -90,7 +99,7 @@ export class FlowEngine {
         if (typeof processed.cancelWhen === 'string') {
             processed.cancelWhen = FlowParser.parse(processed.cancelWhen);
         }
-        return processed as Step;
+        return processed as ParsedStep;
     }
 
     /**
@@ -371,7 +380,7 @@ export class FlowEngine {
     }
 
     // ☠️ 死亡判定
-    private tryCancelStep(step: Step, stepId: string, currentEventTs: number): boolean {
+    private tryCancelStep(step: ParsedStep, stepId: string, currentEventTs: number): boolean {
         const ctx = this.buildContext(stepId, currentEventTs);
         // 👉 O(1) 闭包调用！
         if (!step.compiledCancelWhen || !step.compiledCancelWhen(ctx)) {
@@ -392,7 +401,7 @@ export class FlowEngine {
     }
 
     // ✅ 完成判定
-    private tryCompleteStep(step: Step, stepId: string, currentEventTs: number): boolean {
+    private tryCompleteStep(step: ParsedStep, stepId: string, currentEventTs: number): boolean {
         const ctx = this.buildContext(stepId, currentEventTs);
         // 👉 O(1) 闭包调用！
         if (!step.compiledWhen || !step.compiledWhen(ctx)) {
@@ -404,7 +413,7 @@ export class FlowEngine {
             timestamp: currentEventTs,
             stepId,
             toStep: step.next?.join(','),
-            meta: {conditionType: step.when.type}
+            meta: { conditionType: step.when.type }
         });
 
         this.completedSteps.add(stepId);

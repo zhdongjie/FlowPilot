@@ -22,9 +22,12 @@ export class GuideRenderer {
         if(!step.ui) return
 
         const pos = this.position.compute(rect, step.ui.position);
+
         this.layer.show({
-            ...pos,
-            content: step.ui.content
+            x: pos.x,
+            y: pos.y,
+            content: step.ui.content,
+            nextLabel: step.ui.nextLabel
         });
     }
 
@@ -43,7 +46,13 @@ export class GuideRenderer {
         this.layer.highlight(rect);
         if(!this.lastStep.ui) return
         const pos = this.position.compute(rect, this.lastStep.ui.position);
-        this.layer.update(pos);
+
+        this.layer.update({
+            x: pos.x,
+            y: pos.y,
+            content: this.lastStep.ui.content,
+            nextLabel: this.lastStep.ui.nextLabel
+        });
     }
 
     hide() {
@@ -51,4 +60,9 @@ export class GuideRenderer {
         this.lastTarget = null;
         this.lastStep = null;
     }
+
+    public getLayer() {
+        return this.layer;
+    }
+
 }

@@ -74,4 +74,9 @@ export class GuideOrchestrator {
         this.currentStepId = nextId;
         this.renderer.render(step, el);
     }
+
+    public getRenderer() {
+        return this.renderer;
+    }
+
 }

@@ -29,6 +29,16 @@ export class GuideController {
         // 传入适配器给采集层
         this.collector = new BehaviorCollector(this.runtime, options.networkAdapters);
         this.orchestrator = new GuideOrchestrator(this.runtime, compiledSteps);
+        this.orchestrator.getRenderer().getLayer().setOnNext(() => {
+            const activeStepId = this.runtime.activeSteps[0];
+            if (activeStepId) {
+                this.runtime.dispatch({
+                    id: `btn_${Date.now()}`,
+                    key: `click_next_${activeStepId}`,
+                    timestamp: Date.now()
+                });
+            }
+        });
     }
 
     start() {

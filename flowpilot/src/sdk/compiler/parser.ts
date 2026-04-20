@@ -219,6 +219,11 @@ export class FlowParser {
                     within: hasTime ? parseInt(lastArg, 10) : undefined
                 };
             }
+            case 'timer':
+                return {
+                    type: 'not',
+                    condition: { type: 'event', key: '__internal_timer__', within: parseInt(args[0], 10) }
+                };
             default:
                 throw new Error(`[FlowParser] Unknown function: ${name}`);
         }

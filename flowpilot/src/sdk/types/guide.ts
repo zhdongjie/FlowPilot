@@ -7,6 +7,7 @@ export interface GuideStepUI {
     content: string;      // 引导气泡的内容
     title?: string;       // 气泡标题
     position?: 'top' | 'bottom' | 'left' | 'right'; // 气泡位置
+    nextLabel?: string;
 }
 
 export interface GuideStep extends Step {

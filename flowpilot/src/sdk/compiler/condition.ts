@@ -1,7 +1,6 @@
 // src/sdk/compiler/condition.ts
 
-import type { Condition, EventCondition, SequenceCondition, NotCondition } from "../types";
-import type { CompiledCondition, EvalContext } from "../types";
+import type { Condition, EventCondition, SequenceCondition, NotCondition, CompiledCondition, EvalContext } from "../types";
 
 export class ConditionCompiler {
 

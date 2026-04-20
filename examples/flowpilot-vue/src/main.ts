@@ -22,7 +22,18 @@ const guide = new GuideController({
     steps: onboardingSteps,
     rootStepId: "step_login",
     networkAdapters: [
-        new AxiosAdapter(axios) // 把 axios 实例喂给适配器
+        new AxiosAdapter(axios, (res) => {
+            // 🌟 自由定制！例如：如果 message 是 success，就发射 url 路径作为事件
+            if (res.data.message === 'success') {
+                // 如果请求的是 /api/login，这里就返回 "api_login_success"
+                return `${res.config.url.replace('/api/', '')}_success`;
+            }
+            // 如果后端是用特定的 code 结构
+            if (res.status === 200 && res.data?.code) {
+                return res.data.code;
+            }
+            return null; // 返回 null 表示不发射任何信号
+        })
     ]
 });
 

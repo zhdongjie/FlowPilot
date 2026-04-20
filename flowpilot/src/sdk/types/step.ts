@@ -37,3 +37,9 @@ export interface Step {
     compiledCancelWhen?: CompiledCondition;
 
 }
+
+export interface ParsedStep extends Step {
+    when: Condition;
+    enterWhen?: Condition;
+    cancelWhen?: Condition;
+}

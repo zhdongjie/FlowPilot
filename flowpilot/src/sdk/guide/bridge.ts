@@ -23,14 +23,25 @@ export class GuideBridge {
         this.syncUI();
     }
 
-    private syncUI() {
+    private async syncUI() {
+        // 1. 获取当前活跃的步骤 ID
         const activeId = this.runtime.activeSteps[0];
+
+        // 2. 从剧本库中找到对应的完整 Step 对象
         const step = this.steps.find(s => s.id === activeId);
 
+        // 3. 核心逻辑判断
         if (step?.ui) {
-            this.renderer.render(step.ui);
+            const targetElement = document.querySelector(step.ui.selector) as HTMLElement;
+
+            if (targetElement) {
+                this.renderer.render(step, targetElement);
+            } else {
+                // 如果没找到元素（可能还没渲染出来），则暂时隐藏
+                this.renderer.hide();
+            }
         } else {
-            this.renderer.clear();
+            this.renderer.hide();
         }
     }
 }
