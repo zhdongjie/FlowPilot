@@ -1,23 +1,24 @@
-// src/sdk/collector/network.ts
-export class NetworkCollector {
-    private onEventCallback?: (signal: { key: string; meta?: any }) => void;
+// flowpilot/src/sdk/collector/network.ts
+import type { NetworkAdapter, EmitFunction } from "../types";
 
-    onEvent(cb: (signal: { key: string; meta?: any }) => void) {
+export class NetworkCollector {
+    private adapters: NetworkAdapter[];
+    private onEventCallback?: EmitFunction;
+
+    constructor(adapters: NetworkAdapter[] = []) {
+        this.adapters = adapters;
+    }
+
+    onEvent(cb: EmitFunction) {
         this.onEventCallback = cb;
     }
 
     start() {
-        const originalFetch = window.fetch;
-        window.fetch = async (...args) => {
-            const res = await originalFetch(...args);
-            // 简单演示：成功后发射信号
-            if (res.ok) {
-                this.onEventCallback?.({
-                    key: "network:success",
-                    meta: { url: args[0] }
-                });
-            }
-            return res;
-        };
+        if (!this.onEventCallback) return;
+        this.adapters.forEach(adapter => {
+            adapter.install((signal) => {
+                this.onEventCallback!(signal);
+            });
+        });
     }
 }

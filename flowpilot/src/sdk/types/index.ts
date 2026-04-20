@@ -5,3 +5,4 @@ export * from './step';
 export * from './condition';
 export * from './runtime';
 export * from './guide';
+export * from './collector';

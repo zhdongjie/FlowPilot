@@ -1,33 +1,41 @@
 <script setup lang="ts">
-import { ref, inject } from 'vue'
+import { ref } from 'vue'
+import axios from 'axios'
 
 const isLoggedIn = ref(false)
 const showForm = ref(false)
 
-// 拿到我们注入的全局采集器（用于模拟 Axios 事实）
-const collector = inject('flowCollector') as any
-
-const handleLogin = () => {
-  console.log("模拟请求：正在登录...")
-  setTimeout(() => {
-    isLoggedIn.value = true
-    // 模拟 Axios 拦截器发出的事实信号
-    collector.emit('login_success')
-  }, 1000)
+// 🌟 看这里！完全就是最普通的业务代码，没有任何引导相关的逻辑！
+const handleLogin = async () => {
+  console.log("业务代码：正在发起 POST /api/login ...")
+  try {
+    const res = await axios.post('/api/login', { username: 'admin' })
+    if (res.data.code === 'login_success') {
+      isLoggedIn.value = true
+      console.log("业务代码：登录成功，渲染 Dashboard")
+    }
+  } catch (e) {
+    console.error(e)
+  }
 }
 
-const handleSubmit = () => {
-  console.log("模拟请求：正在提交...")
-  setTimeout(() => {
-    showForm.value = false
-    collector.emit('submit_success')
-  }, 500)
+const handleSubmit = async () => {
+  console.log("业务代码：正在发起 POST /api/submit ...")
+  try {
+    const res = await axios.post('/api/submit', { idCard: '123456' })
+    if (res.data.code === 'submit_success') {
+      showForm.value = false
+      alert("表单提交成功！")
+    }
+  } catch (e) {
+    console.error(e)
+  }
 }
 </script>
 
 <template>
   <div style="padding: 50px; font-family: sans-serif;">
-    <h2>FlowPilot E2E 测试演练场</h2>
+    <h2>FlowPilot 工业级 E2E 测试演练场</h2>
 
     <div v-if="!isLoggedIn" style="margin-top: 50px;">
       <input type="text" placeholder="Username" style="padding: 8px; margin-right: 10px;"/>
