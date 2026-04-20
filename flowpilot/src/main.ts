@@ -1,3 +1,4 @@
+// src/main.tx
 import { createApp } from 'vue'
 import App from './App.vue'
 
