@@ -3,108 +3,93 @@
 import { FlowEngine } from "../core/engine";
 import type { Step, Signal } from "../types";
 
-export interface RuntimeOptions {
-    steps: Step[];
-    rootStepId: string;
-    // 调度器心跳频率 (毫秒)
-    tickInterval?: number;
-}
-
-/**
- * FlowRuntime (V2)
- * 核心职责：作为唯一对外的高级 API 入口，接管真实时间驱动，激活 Temporal 时间轴
- */
 export class FlowRuntime {
     private readonly engine: FlowEngine;
-    private readonly options: RuntimeOptions;
+    private timer: any = null;
 
-    private ticker: any = null;
-
-    constructor(options: RuntimeOptions) {
-        this.options = options;
-
-        // 1. 初始化 V2 纯净内核（内部自带了 Trace 和预编译闭包）
+    constructor(options: { steps: Step[], rootStepId: string }) {
         this.engine = new FlowEngine(options.steps, options.rootStepId);
     }
 
     // -------------------------
-    // ⏰ 时间调度器 (Scheduler)
+    // ⏰ 精准调度器逻辑
     // -------------------------
 
-    /**
-     * 启动工作流：让时间流逝真正介入状态机
-     */
-    start() {
-        if (this.ticker) return;
+    private scheduleNext() {
+        if (this.timer) clearTimeout(this.timer);
 
-        const interval = this.options.tickInterval || 1000; // 默认 1 秒滴答一次
+        const next = this.engine.peekNextTimer();
+        if (!next) return;
 
-        // 赋予绝对起跑时间
-        this.engine.tick(Date.now());
+        // 计算距离触发还有多久
+        const delay = Math.max(0, next.ts - Date.now());
 
-        // 启动心跳，自动触发 cancelWhen 等超时校验
-        this.ticker = setInterval(() => {
-            this.engine.tick(Date.now());
-        }, interval);
-
-        console.log(`[FlowRuntime] Started with tick interval ${interval}ms`);
+        this.timer = setTimeout(() => {
+            this.runDueTasks();
+        }, delay);
     }
 
-    /**
-     * 暂停调度
-     */
-    stop() {
-        if (this.ticker) {
-            clearInterval(this.ticker);
-            this.ticker = null;
-            console.log("[FlowRuntime] Stopped");
+    private runDueTasks() {
+        const now = Date.now();
+
+        while (true) {
+            const next = this.engine.peekNextTimer();
+            // 如果堆顶的任务还没到时间，或者堆空了，退出
+            if (!next || next.ts > now) break;
+
+            this.engine.popNextTimer();
+
+            // 防御检查：只有活跃步骤的 Timer 才触发
+            if (this.engine.getActiveSteps().includes(next.stepId)) {
+                this.engine.tick(next.ts);
+            }
         }
+
+        // 递归调度下一个最近的任务
+        this.scheduleNext();
     }
 
     // -------------------------
-    // 🚀 核心交互 API
+    // 🚀 接口对接
     // -------------------------
 
-    /**
-     * 发送业务信号（UI 层只需要传 id 和 key，时间戳由 Runtime 自动打上绝对时间）
-     */
-    dispatch(signal: Omit<Signal, 'timestamp'>) {
-        this.engine.ingest({
-            ...signal,
-            timestamp: Date.now() // 强制统一现实时间
-        });
+    start() {
+        this.engine.tick(Date.now());
+        this.scheduleNext();
     }
 
-    /**
-     * 时空回溯：回滚到目标步骤完成那一刻
-     */
+    stop() {
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = null;
+    }
+
+    dispatch(signal: Signal) {
+        this.engine.ingest(signal);
+        // 信号可能导致新步骤激活或旧步骤完成，必须重新排期
+        this.scheduleNext();
+    }
+
     revert(stepId: string) {
         this.engine.revert(stepId);
+        // 回溯后时间轴变了，重新排期
+        this.scheduleNext();
     }
 
-    // -------------------------
-    // 📊 状态读取与诊断
-    // -------------------------
-
-    get activeSteps() {
+    get activeSteps(): string[] {
         return this.engine.getActiveSteps();
     }
 
-    get completedSteps() {
+    /**
+     * 获取已完成的步骤 ID 列表
+     */
+    get completedSteps(): string[] {
         return this.engine.getCompletedSteps();
     }
 
     /**
-     * 获取完整引擎快照与 V2 底层 Trace 日志
+     * 提供给外部的调试快照
      */
-    debug() {
+    public debug() {
         return this.engine.inspect();
-    }
-
-    /**
-     * 对外暴露引擎实例（高级用法）
-     */
-    getEngine() {
-        return this.engine;
     }
 }

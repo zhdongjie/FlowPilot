@@ -5,6 +5,7 @@ import { TraceStore } from "../runtime/trace";
 import type { Condition, DiagnosticNode, EvalContext, EventCondition, SequenceCondition, Signal, Step } from "../types";
 import { FlowParser } from "../compiler/parser";
 import { ConditionCompiler } from "../compiler/condition";
+import {TimerScheduler} from "../runtime/scheduler.ts";
 
 export interface IndexedEvent {
     ts: number;
@@ -33,6 +34,7 @@ export class FlowEngine {
     private readonly rootStepId: string;
 
     private readonly evalCtx: EvalContext;
+    private readonly scheduler = new TimerScheduler();
 
     constructor(steps: Step[], rootStepId: string) {
         steps.forEach(rawStep => {
@@ -138,6 +140,7 @@ export class FlowEngine {
         this.activatedAt.clear();
         this.completedAt.clear();
         this.eventIndex.clear();
+        this.scheduler.clear();
 
         if (this.rootStepId) {
             // 1. 起点节点先进入 pending 状态
@@ -149,10 +152,44 @@ export class FlowEngine {
         }
     }
 
+    private registerTimersForStep(stepId: string, activatedAt: number) {
+        const step = this.stepsMap.get(stepId);
+        if (!step) return;
+
+        // 递归采集 Condition 中的 within
+        const collect = (cond?: Condition) => {
+            if (!cond) return;
+            switch (cond.type) {
+                case "event":
+                    if (cond.within) {
+                        this.scheduler.push({ ts: activatedAt + cond.within, stepId, type: "timeout" });
+                    }
+                    break;
+                case "sequence":
+                    if (cond.within) {
+                        this.scheduler.push({ ts: activatedAt + cond.within, stepId, type: "timeout" });
+                    }
+                    break;
+                case "not":
+                    collect(cond.condition);
+                    break;
+                case "and":
+                case "or":
+                    cond.conditions.forEach(collect);
+                    break;
+            }
+        };
+
+        collect(step.when);
+        collect(step.cancelWhen);
+        if (step.enterWhen) collect(step.enterWhen);
+    }
+
     private activateStep(stepId: string, timestamp: number) {
         this.activeSteps.add(stepId);
         this.activatedAt.set(stepId, timestamp);
-
+        // 👉 关键点：注册该步骤关联的所有时间约束
+        this.registerTimersForStep(stepId, timestamp);
         this.trace.record({
             type: "STEP_ACTIVATE",
             timestamp,
@@ -186,6 +223,11 @@ export class FlowEngine {
     getCompletedSteps() {
         return [...this.completedSteps];
     }
+
+    // 供 Runtime 使用的 API
+    peekNextTimer() { return this.scheduler.peek(); }
+
+    popNextTimer() { return this.scheduler.pop(); }
 
     // -------------------------
     // INGEST (幂等对齐)

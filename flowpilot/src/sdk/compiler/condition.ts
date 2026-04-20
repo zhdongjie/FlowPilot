@@ -113,7 +113,7 @@ export class ConditionCompiler {
                 if (happened) return false;
 
                 // 如果没发生，且绝对时间已经越过了窗口，NOT 判定成功！
-                return ctx.currentEventTs - cutoff > c.within;
+                return ctx.currentEventTs - cutoff >= c.within;
             }
 
             // 瞬时否定

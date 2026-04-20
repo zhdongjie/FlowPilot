@@ -1,6 +1,6 @@
 // src/sdk/compiler/parser.ts
 
-import type { Condition } from "../types";
+import type { Condition, EventCondition } from "../types";
 
 // V2 词法 Token 支持 'NOT'
 type TokenType = 'AND' | 'OR' | 'NOT' | 'LPAREN' | 'RPAREN' | 'COMMA' | 'IDENTIFIER' | 'NUMBER' | 'EOF';
@@ -41,7 +41,6 @@ class Lexer {
         return null;
     }
 
-    // 🌟 扁平化匹配，0 认知复杂度
     getNextToken(): Token {
         this.skipWhitespace();
 
@@ -124,35 +123,69 @@ export class FlowParser {
 
     private parsePrimary(): Condition {
         const token = this.currentToken;
+        let node: Condition;
 
-        // V2 逻辑非解析
         if (token.type === 'NOT') {
             this.eat('NOT');
-            return {
+            node = {
                 type: 'not',
                 condition: this.parsePrimary()
             };
-        }
-
-        if (token.type === 'LPAREN') {
+        } else if (token.type === 'LPAREN') {
             this.eat('LPAREN');
-            const node = this.parseOr();
+            node = this.parseOr();
             this.eat('RPAREN');
-            return node;
-        }
-
-        if (token.type === 'IDENTIFIER') {
+        } else if (token.type === 'IDENTIFIER') {
             const name = token.value;
             this.eat('IDENTIFIER');
 
             if (this.currentToken.type === 'LPAREN') {
-                return this.parseFunction(name);
+                node = this.parseFunction(name);
+            } else {
+                node = { type: "event", key: name };
             }
-
-            return { type: "event", key: name };
+        } else {
+            throw new Error(`[FlowParser] Unexpected token: ${token.value}`);
         }
 
-        throw new Error(`[FlowParser] Unexpected token: ${token.value}`);
+        // 🌟 核心改进：解析后缀修饰符 (Modifiers)
+        return this.parseModifiers(node);
+    }
+
+    /**
+     * 处理后缀语法，如：pay within(2000) 或 !pay within(2000)
+     */
+    private parseModifiers(node: Condition): Condition {
+        while (this.currentToken.type === 'IDENTIFIER') {
+            const modName = this.currentToken.value;
+
+            if (modName === 'within' || modName === 'count') {
+                this.eat('IDENTIFIER');
+                this.eat('LPAREN');
+                const val = parseInt(this.currentToken.value, 10);
+                this.eat('NUMBER');
+                this.eat('RPAREN');
+
+                // 寻找可以应用修饰符的底层 event 节点
+                const target = this.findEventTarget(node);
+                if (target) {
+                    if (modName === 'within') target.within = val;
+                    if (modName === 'count') target.count = val;
+                }
+            } else {
+                break;
+            }
+        }
+        return node;
+    }
+
+    /**
+     * 辅助方法：递归向下寻找修饰符的目标 EventCondition
+     */
+    private findEventTarget(node: Condition): EventCondition | null {
+        if (node.type === 'event') return node;
+        if (node.type === 'not') return this.findEventTarget(node.condition);
+        return null;
     }
 
     private parseFunction(name: string): Condition {
@@ -168,7 +201,6 @@ export class FlowParser {
         }
         this.eat('RPAREN');
 
-        // V2 业务函数映射
         switch (name) {
             case 'count':
                 return { type: 'event', key: args[0], count: parseInt(args[1], 10) };
