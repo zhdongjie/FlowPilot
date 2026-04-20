@@ -2,7 +2,8 @@
 
 import type { Condition } from "../types";
 
-type TokenType = 'AND' | 'OR' | 'LPAREN' | 'RPAREN' | 'COMMA' | 'IDENTIFIER' | 'NUMBER' | 'EOF';
+// V2 词法 Token 支持 'NOT'
+type TokenType = 'AND' | 'OR' | 'NOT' | 'LPAREN' | 'RPAREN' | 'COMMA' | 'IDENTIFIER' | 'NUMBER' | 'EOF';
 
 interface Token {
     type: TokenType;
@@ -10,7 +11,6 @@ interface Token {
 }
 
 class Lexer {
-    // 👈 修复：显式声明属性，不再使用参数属性简写
     private readonly input: string;
     private pos = 0;
 
@@ -18,57 +18,70 @@ class Lexer {
         this.input = input;
     }
 
-    getNextToken(): Token {
-        while (this.pos < this.input.length) {
-            const char = this.input[this.pos];
-
-            if (/\s/.test(char)) { this.pos++; continue; }
-            if (char === '(') { this.pos++; return { type: 'LPAREN', value: '(' }; }
-            if (char === ')') { this.pos++; return { type: 'RPAREN', value: ')' }; }
-            if (char === ',') { this.pos++; return { type: 'COMMA', value: ',' }; }
-
-            if (char === '&' && this.input[this.pos + 1] === '&') {
-                this.pos += 2; return { type: 'AND', value: '&&' };
-            }
-            if (char === '|' && this.input[this.pos + 1] === '|') {
-                this.pos += 2; return { type: 'OR', value: '||' };
-            }
-
-            if (/[0-9]/.test(char)) {
-                const match = this.input.slice(this.pos).match(/^[0-9]+/);
-                if (match) {
-                    this.pos += match[0].length;
-                    return { type: 'NUMBER', value: match[0] };
-                }
-            }
-
-            const match = this.input.slice(this.pos).match(/^[a-zA-Z0-9_\-.]+/);
-            if (match) {
-                this.pos += match[0].length;
-                return { type: 'IDENTIFIER', value: match[0] };
-            }
-
-            throw new Error(`[FlowCompiler] Unexpected char: ${char} at position ${this.pos}`);
+    private skipWhitespace() {
+        while (this.pos < this.input.length && /\s/.test(this.input[this.pos])) {
+            this.pos++;
         }
-        return { type: 'EOF', value: '' };
+    }
+
+    private matchExact(str: string, type: TokenType): Token | null {
+        if (this.input.startsWith(str, this.pos)) {
+            this.pos += str.length;
+            return { type, value: str };
+        }
+        return null;
+    }
+
+    private matchRegex(regex: RegExp, type: TokenType): Token | null {
+        const match = this.input.slice(this.pos).match(regex);
+        if (match) {
+            this.pos += match[0].length;
+            return { type, value: match[0] };
+        }
+        return null;
+    }
+
+    // 🌟 扁平化匹配，0 认知复杂度
+    getNextToken(): Token {
+        this.skipWhitespace();
+
+        if (this.pos >= this.input.length) {
+            return { type: 'EOF', value: '' };
+        }
+
+        const token =
+            this.matchExact('&&', 'AND') ||
+            this.matchExact('||', 'OR') ||
+            this.matchExact('!', 'NOT') ||
+            this.matchExact('(', 'LPAREN') ||
+            this.matchExact(')', 'RPAREN') ||
+            this.matchExact(',', 'COMMA') ||
+            this.matchRegex(/^[0-9]+/, 'NUMBER') ||
+            this.matchRegex(/^[a-zA-Z0-9_\-.]+/, 'IDENTIFIER');
+
+        if (token) {
+            return token;
+        }
+
+        throw new Error(`[FlowParser] Unexpected char: ${this.input[this.pos]} at position ${this.pos}`);
     }
 }
 
-export class FlowCompiler {
+export class FlowParser {
     private lexer!: Lexer;
     private currentToken!: Token;
 
     /**
-     * 入口方法：编译 DSL 字符串为 Condition AST
+     * 入口方法：解析 DSL 字符串为 Condition AST
      */
-    static compile(expr: string): Condition {
-        const compiler = new FlowCompiler();
-        compiler.lexer = new Lexer(expr);
-        compiler.currentToken = compiler.lexer.getNextToken();
-        const result = compiler.parseOr();
+    static parse(expr: string): Condition {
+        const parser = new FlowParser();
+        parser.lexer = new Lexer(expr);
+        parser.currentToken = parser.lexer.getNextToken();
+        const result = parser.parseOr();
 
-        if (compiler.currentToken.type !== 'EOF') {
-            throw new Error(`[FlowCompiler] Unexpected token at end: ${compiler.currentToken.value}`);
+        if (parser.currentToken.type !== 'EOF') {
+            throw new Error(`[FlowParser] Unexpected token at end: ${parser.currentToken.value}`);
         }
         return result;
     }
@@ -77,7 +90,7 @@ export class FlowCompiler {
         if (this.currentToken.type === type) {
             this.currentToken = this.lexer.getNextToken();
         } else {
-            throw new Error(`[FlowCompiler] Expected ${type} but got ${this.currentToken.type}`);
+            throw new Error(`[FlowParser] Expected ${type} but got ${this.currentToken.type}`);
         }
     }
 
@@ -86,7 +99,6 @@ export class FlowCompiler {
         while (this.currentToken.type === 'OR') {
             this.eat('OR');
             const right = this.parseAnd();
-            // 优化：展平 OR 节点
             if (node.type === 'or') {
                 node.conditions.push(right);
             } else {
@@ -101,7 +113,6 @@ export class FlowCompiler {
         while (this.currentToken.type === 'AND') {
             this.eat('AND');
             const right = this.parsePrimary();
-            // 优化：展平 AND 节点
             if (node.type === 'and') {
                 node.conditions.push(right);
             } else {
@@ -113,6 +124,15 @@ export class FlowCompiler {
 
     private parsePrimary(): Condition {
         const token = this.currentToken;
+
+        // V2 逻辑非解析
+        if (token.type === 'NOT') {
+            this.eat('NOT');
+            return {
+                type: 'not',
+                condition: this.parsePrimary()
+            };
+        }
 
         if (token.type === 'LPAREN') {
             this.eat('LPAREN');
@@ -132,7 +152,7 @@ export class FlowCompiler {
             return { type: "event", key: name };
         }
 
-        throw new Error(`[FlowCompiler] Unexpected token: ${token.value}`);
+        throw new Error(`[FlowParser] Unexpected token: ${token.value}`);
     }
 
     private parseFunction(name: string): Condition {
@@ -148,13 +168,17 @@ export class FlowCompiler {
         }
         this.eat('RPAREN');
 
+        // V2 业务函数映射
         switch (name) {
             case 'count':
                 return { type: 'event', key: args[0], count: parseInt(args[1], 10) };
             case 'within':
                 return { type: 'event', key: args[0], within: parseInt(args[1], 10) };
+            case 'after':
+                return { type: 'after', stepId: args[0] };
+            case 'once':
+                return { type: 'event', key: args[0], once: true };
             case 'seq': {
-                // 如果最后一个参数是数字，将其作为 within
                 const lastArg = args[args.length - 1];
                 const hasTime = !isNaN(Number(lastArg));
                 return {
@@ -164,7 +188,7 @@ export class FlowCompiler {
                 };
             }
             default:
-                throw new Error(`[FlowCompiler] Unknown function: ${name}`);
+                throw new Error(`[FlowParser] Unknown function: ${name}`);
         }
     }
 }
