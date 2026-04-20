@@ -82,6 +82,7 @@ const guide = new GuideController({
             onFlowComplete: () => {
                 // 真正工业级应用的做法：打个全剧终埋点，并给个弹窗
                 console.log(`[业务侧] 恭喜！整个剧本通关！`);
+                localStorage.setItem('flowpilot_onboarding_v1_finished', 'true');
             }
         },
 

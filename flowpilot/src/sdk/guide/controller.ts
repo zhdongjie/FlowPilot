@@ -80,28 +80,31 @@ export class GuideController {
     }
 
     public start() {
-        this.collector.mount();
-        this.orchestrator.start();
-        this.runtime.start();
-
         const { persistence } = this.config.runtime;
 
+        // 1. 最高优先级的拦截：检查是否已经全剧终
         if (persistence.enabled) {
-            const isFinished = localStorage.getItem(persistence.key);
+            // 我们约定：全剧终的标记键名是配置 key 加上 '_finished'
+            const isFinished = localStorage.getItem(`${persistence.key}_finished`);
             if (isFinished === 'true') {
                 if (this.config.debug) {
-                    console.log(`💤 [FlowPilot] 检查到已通关记录 (${persistence.key})，引导引擎自动休眠。`);
+                    console.log(`💤 [FlowPilot] 检查到已通关记录，引导引擎自动休眠。`);
                 }
-                return; // 极速退出，不消耗任何性能，不挂载任何事件！
+                return; // 极速退出，一丁点性能都不浪费！
             }
         }
+
         if (this.config.debug) {
             console.log("🚀 [FlowPilot] 引导引擎启动...");
         }
-        this.collector.mount();
-        this.orchestrator.start();
+
         this.runtime.start();
 
+        // 2. 正常启动流程
+        this.collector.mount();
+        this.orchestrator.start();
+
+        // 3. 发射初始脉冲
         if (this.config.runtime.autoStart && this.runtime.activeSteps.length === 0) {
             this.runtime.dispatch({
                 id: `init_${Date.now()}`,
