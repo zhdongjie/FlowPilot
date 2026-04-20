@@ -12,4 +12,6 @@ export interface Signal {
     timestamp: number;
 
     payload?: any; // 👉 支持业务自定义数据
+
+    meta?: Record<string, any>;
 }

@@ -1,7 +1,13 @@
-// src/sdk/index.tx
-import { FlowEngine } from './core/engine';
-import { FlowCompiler } from './compiler/parser';
-import type { Step, Condition } from './types';
+// flowpilot/src/sdk/index.ts
+
+import {FlowEngine} from './core/engine';
+import {FlowParser} from './compiler/parser';
+import type {Condition, Step} from './types';
+
+
+export {GuideController} from "./guide/controller";
+export {FlowGuidePlugin} from "./vue/plugin";
+export type {GuideStep} from "./types/guide";
 
 // 定义用户可能传入的带字符串语法糖的 Step
 export interface DslStep extends Omit<Step, 'when'> {
@@ -17,7 +23,7 @@ export function createFlowPilot(steps: DslStep[], rootId: string): FlowEngine {
         if (typeof step.when === 'string') {
             return {
                 ...step,
-                when: FlowCompiler.compile(step.when)
+                when: FlowParser.parse(step.when)
             };
         }
         return step as Step;
@@ -25,3 +31,4 @@ export function createFlowPilot(steps: DslStep[], rootId: string): FlowEngine {
 
     return new FlowEngine(compiledSteps, rootId);
 }
+
