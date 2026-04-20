@@ -1,7 +1,7 @@
 // src/sdk/guide/orchestrator.ts
 
-import type { FlowRuntime } from "../runtime/runtime"; //
-import type { GuideStep } from "../types";
+import type { FlowRuntime } from "../runtime/runtime";
+import type { FlowConfig, GuideStep } from "../types";
 import { DOMTracker } from "./dom-tracker";
 import { StepScheduler } from "./scheduler";
 import { GuideRenderer } from "./renderer";
@@ -17,10 +17,13 @@ export class GuideOrchestrator {
     private currentStepId: string | null = null;
     private running = false;
 
+    private readonly config: FlowConfig;
+
     // 符合 erasableSyntaxOnly 的构造函数
-    constructor(runtime: FlowRuntime, steps: GuideStep[]) {
+    constructor(runtime: FlowRuntime, steps: GuideStep[], config: FlowConfig) {
         this.runtime = runtime;
         this.stepsMap = new Map(steps.map(s => [s.id, s]));
+        this.config = config;
     }
 
     start() {
@@ -38,12 +41,12 @@ export class GuideOrchestrator {
         while (this.running) {
             await this.tick();
             // 降低轮询频率至 20Hz (50ms)，平衡性能与即时性
-            await new Promise(r => setTimeout(r, 50));
+            await new Promise(r => setTimeout(r, this.config.runtime.pollingInterval));
         }
     }
 
     private async tick() {
-        const active = this.runtime.activeSteps; //
+        const active = this.runtime.activeSteps;
         const nextId = this.scheduler.pick(active);
 
         // 1. 如果没有活跃步骤，直接清空渲染
@@ -72,7 +75,8 @@ export class GuideOrchestrator {
 
         // 4. 只有当“万事俱备”时，才调用 Renderer 进行同步绘制
         this.currentStepId = nextId;
-        this.renderer.render(step, el);
+
+        this.renderer.render(step, el, this.config);
     }
 
     public getRenderer() {

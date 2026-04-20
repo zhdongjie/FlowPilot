@@ -1,6 +1,6 @@
 // src/sdk/guide/renderer.ts
 
-import type { GuideStep } from "../types";
+import type { FlowConfig, GuideStep } from "../types";
 import { TransitionLayer } from "./layer";
 import { PositionEngine } from "./position";
 
@@ -13,7 +13,7 @@ export class GuideRenderer {
     /**
      * 纯同步渲染逻辑
      */
-    render(step: GuideStep, el: HTMLElement) {
+    render(step: GuideStep, el: HTMLElement, config: FlowConfig) {
         this.lastTarget = el;
         this.lastStep = step;
 
@@ -21,13 +21,16 @@ export class GuideRenderer {
         this.layer.highlight(rect);
         if(!step.ui) return
 
-        const pos = this.position.compute(rect, step.ui.position);
+        const position = step.ui.position || config.ui.defaultPosition;
+        const nextLabel = step.ui.nextLabel || config.ui.defaultNextLabel;
+
+        const pos = this.position.compute(rect, position);
 
         this.layer.show({
             x: pos.x,
             y: pos.y,
             content: step.ui.content,
-            nextLabel: step.ui.nextLabel
+            nextLabel: nextLabel
         });
     }
 
