@@ -1,4 +1,7 @@
 // src/sdk/guide/layer.ts
+
+import { FlowConfig } from "../types";
+
 export class TransitionLayer {
     private readonly overlay: HTMLDivElement;
     private readonly tooltip: HTMLDivElement;
@@ -6,36 +9,34 @@ export class TransitionLayer {
     private readonly nextBtn: HTMLButtonElement;
     private onNextClick?: () => void;
 
-    constructor() {
+    constructor(config: FlowConfig) {
         this.overlay = document.createElement("div");
         this.tooltip = document.createElement("div");
         this.contentBox = document.createElement("div");
         this.nextBtn = document.createElement("button");
-        this.init();
+        this.init(config);
     }
 
-    private init() {
-        // 蒙层样式
+    private init(config: FlowConfig) {
+        const { theme } = config;
+
         Object.assign(this.overlay.style, {
-            position: "fixed", inset: "0", zIndex: "9998",
-            background: "rgba(0,0,0,0.6)", pointerEvents: "none",
+            position: "fixed", inset: "0", zIndex: String(theme.zIndex - 1),
+            background: theme.maskColor, pointerEvents: "none",
             transition: "clip-path 0.25s ease-out", display: "none"
         });
 
-        // 气泡容器
         Object.assign(this.tooltip.style, {
             position: "fixed", top: "0px", left: "0px",
-            zIndex: "9999", background: "#fff",
-            padding: "16px", borderRadius: "8px", display: "none",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-            transition: "all 0.2s ease-out", minWidth: "200px"
+            zIndex: String(theme.zIndex), background: "#fff",
+            padding: "16px", borderRadius: theme.borderRadius, display: "none",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.2)"
         });
 
-        // 按钮样式
         Object.assign(this.nextBtn.style, {
-            marginTop: "12px", padding: "6px 12px", background: "#007aff",
-            color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer",
-            fontSize: "12px", display: "none"
+            marginTop: "12px", padding: "6px 12px",
+            background: theme.primaryColor, color: "#fff",
+            border: "none", borderRadius: "4px", cursor: "pointer"
         });
 
         this.nextBtn.onclick = (e) => {

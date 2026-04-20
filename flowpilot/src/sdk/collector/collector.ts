@@ -2,15 +2,23 @@
 import type { FlowRuntime } from "../runtime/runtime";
 import { DOMCollector } from "./dom";
 import { NetworkCollector } from "./network";
-import type { NetworkAdapter } from "../types";
+import type { FlowConfig } from "../types";
 
 export class BehaviorCollector {
     private readonly runtime: FlowRuntime;
-    private readonly dom = new DOMCollector();
+    private readonly dom: DOMCollector;
     private readonly net: NetworkCollector;
 
-    constructor(runtime: FlowRuntime, adapters: NetworkAdapter[] = []) {
+    constructor(runtime: FlowRuntime, config: FlowConfig) {
         this.runtime = runtime;
+        this.dom = new DOMCollector(config.runtime);
+        const adapters = config.adapters || [];
+
+        if (adapters.length > 0) {
+            adapters.forEach(adapter => {
+                adapter.install(this.emit.bind(this));
+            });
+        }
         this.net = new NetworkCollector(adapters);
     }
 

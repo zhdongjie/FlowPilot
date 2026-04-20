@@ -2,34 +2,78 @@
 import type { NetworkAdapter } from "./collector";
 
 export interface FlowConfig {
-    // 1. 插件配置
     adapters?: NetworkAdapter[];
 
-    // 2. UI 默认表现
-    ui: {
-        defaultPosition: 'top' | 'bottom' | 'left' | 'right';
-        defaultNextLabel?: string;
-        themeColor: string;
+    // 1. 视觉主题配置
+    theme: {
+        primaryColor: string;    // 按钮和高亮主色
+        maskColor: string;       // 遮罩层颜色
+        textColor: string;       // 文本颜色
+        borderRadius: string;    // 气泡圆角
+        zIndex: number;          // 层级
     };
 
-    // 3. 运行调度配置
-    runtime: {
-        pollingInterval: number; // DOM 检查频率
-        waitForTimeout: number;  // 元素出现等待超时
-        autoStart: boolean;      // 是否自动发送 start 信号
+    // 2. UI 默认行为
+    ui: {
+        defaultPosition: 'top' | 'bottom' | 'left' | 'right';
+        defaultNextLabel: string;
     };
+
+    // 3. 运行控制与持久化
+    runtime: {
+        pollingInterval: number;
+        autoStart: boolean;
+        persistence: {
+            enabled: boolean;
+            key: string;         // localStorage 的键名
+        };
+        // DOM 信号前缀映射表
+        signalPrefix: {
+            click: string;
+            focus: string;
+            blur: string;
+            input: string;
+        };
+        attributeName: string;
+    };
+
+    // 4. 生命周期钩子 (用于业务埋点或联动)
+    hooks: {
+        onStepStart?: (stepId: string) => void;
+        onStepComplete?: (stepId: string) => void;
+        onFlowComplete?: () => void;
+    };
+
+    debug: boolean; // 是否开启控制台日志
 }
 
 export const DEFAULT_CONFIG: FlowConfig = {
-    adapters: [],
+    theme: {
+        primaryColor: "#007aff",
+        maskColor: "rgba(0,0,0,0.6)",
+        textColor: "#333",
+        borderRadius: "8px",
+        zIndex: 9999
+    },
     ui: {
-        defaultPosition: 'bottom',
-        themeColor: '#007aff',
-        defaultNextLabel: '我知道了'
+        defaultPosition: "bottom",
+        defaultNextLabel: "下一步"
     },
     runtime: {
         pollingInterval: 50,
-        waitForTimeout: 3000,
-        autoStart: true
-    }
+        autoStart: true,
+        persistence: {
+            enabled: true,
+            key: "flowpilot_finished"
+        },
+        signalPrefix: {
+            click: 'click_',
+            focus: 'focus_',
+            blur: 'blur_',
+            input: 'input_'
+        },
+        attributeName: 'data-fp'
+    },
+    hooks: {},
+    debug: false
 };

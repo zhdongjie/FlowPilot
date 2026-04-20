@@ -5,10 +5,16 @@ import { TransitionLayer } from "./layer";
 import { PositionEngine } from "./position";
 
 export class GuideRenderer {
-    private readonly layer = new TransitionLayer();
+    private readonly layer: TransitionLayer;
     private readonly position = new PositionEngine();
     private lastTarget: HTMLElement | null = null;
     private lastStep: GuideStep | null = null;
+    private readonly config: FlowConfig;
+
+    constructor(config: FlowConfig) {
+        this.layer = new TransitionLayer(config);
+        this.config = config;
+    }
 
     /**
      * 纯同步渲染逻辑
@@ -21,8 +27,15 @@ export class GuideRenderer {
         this.layer.highlight(rect);
         if(!step.ui) return
 
+        let finalNextLabel: string | undefined = undefined;
+
         const position = step.ui.position || config.ui.defaultPosition;
-        const nextLabel = step.ui.nextLabel || config.ui.defaultNextLabel;
+
+        if (typeof step.ui.nextLabel === 'string') {
+            finalNextLabel = step.ui.nextLabel;
+        } else if (step.ui.nextLabel === true) {
+            finalNextLabel = config.ui.defaultNextLabel;
+        }
 
         const pos = this.position.compute(rect, position);
 
@@ -30,7 +43,7 @@ export class GuideRenderer {
             x: pos.x,
             y: pos.y,
             content: step.ui.content,
-            nextLabel: nextLabel
+            nextLabel: finalNextLabel
         });
     }
 
@@ -50,11 +63,18 @@ export class GuideRenderer {
         if(!this.lastStep.ui) return
         const pos = this.position.compute(rect, this.lastStep.ui.position);
 
+        let finalNextLabel: string | undefined = undefined;
+        if (typeof this.lastStep.ui.nextLabel === 'string') {
+            finalNextLabel = this.lastStep.ui.nextLabel;
+        } else if (this.lastStep.ui.nextLabel === true) {
+            finalNextLabel = this.config.ui.defaultNextLabel;
+        }
+
         this.layer.update({
             x: pos.x,
             y: pos.y,
             content: this.lastStep.ui.content,
-            nextLabel: this.lastStep.ui.nextLabel
+            nextLabel: finalNextLabel
         });
     }
 

@@ -1,14 +1,16 @@
 // src/sdk/runtime/runtime.ts
 
 import { FlowEngine } from "../core/engine";
-import type { Step, Signal } from "../types";
+import type { Step, Signal, FlowConfig } from "../types";
 
 export class FlowRuntime {
     private readonly engine: FlowEngine;
     private timer: any = null;
+    private readonly config: FlowConfig;
 
-    constructor(options: { steps: Step[], rootStepId: string }) {
+    constructor(options: { steps: Step[], rootStepId: string, config: FlowConfig }) {
         this.engine = new FlowEngine(options.steps, options.rootStepId);
+        this.config = options.config;
     }
 
     // -------------------------
@@ -47,6 +49,8 @@ export class FlowRuntime {
 
         // 递归调度下一个最近的任务
         this.scheduleNext();
+
+        this.saveProgress();
     }
 
     // -------------------------
@@ -54,6 +58,29 @@ export class FlowRuntime {
     // -------------------------
 
     start() {
+        const { persistence } = this.config.runtime;
+        if (persistence.enabled) {
+            const saved = localStorage.getItem(persistence.key);
+            if (saved) {
+                try {
+                    // 这里存的不再是信号流，而是简单的 ID 数组：["step_1", "step_2"]
+                    const completedIds: string[] = JSON.parse(saved);
+
+                    // 关键：强制让引擎标记这些步骤为已完成
+                    completedIds.forEach(id => {
+                        this.engine.forceComplete(id);
+                    });
+
+                    if (this.config.debug) {
+                        console.log(`[FlowPilot] 💾 已跳过历史步骤: ${completedIds.join(', ')}`);
+                    }
+                } catch (e) {
+                    localStorage.removeItem(persistence.key);
+                }
+            }
+        }
+
+        // 2. 常规启动
         this.engine.tick(Date.now());
         this.scheduleNext();
     }
@@ -65,8 +92,8 @@ export class FlowRuntime {
 
     dispatch(signal: Signal) {
         this.engine.ingest(signal);
-        // 信号可能导致新步骤激活或旧步骤完成，必须重新排期
         this.scheduleNext();
+        this.saveProgress();
     }
 
     revert(stepId: string) {
@@ -92,4 +119,14 @@ export class FlowRuntime {
     public debug() {
         return this.engine.inspect();
     }
+
+    private saveProgress() {
+        if (this.config.runtime.persistence.enabled) {
+            localStorage.setItem(
+                this.config.runtime.persistence.key,
+                JSON.stringify(this.engine.getCompletedSteps())
+            );
+        }
+    }
+
 }

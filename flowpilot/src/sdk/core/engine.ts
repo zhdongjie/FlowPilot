@@ -672,4 +672,35 @@ export class FlowEngine {
         // 2. 直接调用底层的时间切片方法进行绝对回滚
         this.revertToTime(targetTs);
     }
+
+    public forceComplete(stepId: string) {
+        // 1. 使用 O(1) 的 Map 查找，而不是数组 find
+        const step = this.stepsMap.get(stepId);
+
+        if (step) {
+            // 2. 标记为已完成
+            this.completedSteps.add(stepId);
+
+            // 3. 清理可能残留的旧状态
+            this.activeSteps.delete(stepId);
+            this.pendingSteps.delete(stepId);
+
+            // 4. 记录完成时间（恢复现场时的基准时间）
+            this.completedAt.set(stepId, Date.now());
+
+            // 5. 激活它的后续节点，让引导能顺利接着往下跑
+            this.activateNextSteps(step.next);
+
+            this.trace.record({
+                type: "STEP_ADVANCE" as any,
+                timestamp: Date.now(),
+                stepId,
+                toStep: step.next?.join(','),
+                meta: { reason: "FORCED_BY_PERSISTENCE" }
+            });
+        } else {
+            console.warn(`[FlowPilot Engine] forceComplete failed: Step '${stepId}' not found.`);
+        }
+    }
+
 }

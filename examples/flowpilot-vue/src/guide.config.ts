@@ -15,17 +15,17 @@ export const onboardingSteps: GuideStep[] = [
     {
         id: "step_dashboard",
         when: "click_open_account_btn",
-        next: ["step_form_overview"], // 🌟 进化：不再直接进入输入框，先预览整体
+        next: ["step_form_overview"], // 进化：不再直接进入输入框，先预览整体
         ui: {
             selector: "[data-fp='open_account_btn']",
             content: "登录成功！现在请点击“我要开户”开始申请",
             position: "right"
         }
     },
-    // 🌟 新增：表单容器预览（建立全局认知）
+    // 新增：表单容器预览（建立全局认知）
     {
         id: "step_form_overview",
-        // 🌟 信号进化：支持手动点击气泡内的“开始”按钮跳转
+        // 信号进化：支持手动点击气泡内的“开始”按钮跳转
         when: "click_next_step_form_overview",
         next: ["step_field_name"],
         ui: {
@@ -35,7 +35,7 @@ export const onboardingSteps: GuideStep[] = [
             position: "top"
         }
     },
-    // 🌟 进化：拆分多字段引导
+    // 进化：拆分多字段引导
     {
         id: "step_field_name",
         when: "blur_user_name", // 只有用户填完并离开该字段时，才跳下一步
@@ -70,7 +70,7 @@ export const onboardingSteps: GuideStep[] = [
     {
         id: "step_finish",
         enterWhen: "submit_success",
-        when: "timer(3000)", // 🌟 增加至3秒，给用户阅读庆功文案的时间
+        when: "timer(3000)", // 增加至3秒，给用户阅读庆功文案的时间
         ui: {
             selector: "h2",
             content: "🎉 恭喜！开户资料已成功提交，请耐心等待审核。",

@@ -15,7 +15,7 @@ export class GuideController {
     constructor(options: {
         steps: GuideStep[];
         rootStepId: string;
-        config?: Partial<FlowConfig>; // 🌟 接受部分配置覆盖
+        config?: Partial<FlowConfig>; // 接受部分配置覆盖
     }) {
         // 1. 深度合并配置 (用传入的覆盖默认的)
         this.config = {
@@ -26,16 +26,18 @@ export class GuideController {
         };
 
         // 2. 预处理 Steps (AST 编译)
+
         const compiledSteps = this.compileSteps(options.steps);
 
         // 3. 初始化内核
         this.runtime = new FlowRuntime({
             steps: compiledSteps,
-            rootStepId: options.rootStepId
+            rootStepId: options.rootStepId,
+            config: this.config
         });
 
-        // 4. 初始化采集层 (从 config 中提取适配器) 🌟
-        this.collector = new BehaviorCollector(this.runtime, this.config.adapters);
+        // 4. 初始化采集层 (从 config 中提取适配器)
+        this.collector = new BehaviorCollector(this.runtime, this.config);
 
         // 5. 初始化编排层 (传入配置供 UI 使用)
         this.orchestrator = new GuideOrchestrator(this.runtime, compiledSteps, this.config);
@@ -57,14 +59,23 @@ export class GuideController {
 
     private bindInternalSignals() {
         this.orchestrator.getRenderer().getLayer().setOnNext(() => {
-            const activeStepId = this.runtime.activeSteps[0];
-            if (activeStepId) {
-                this.runtime.dispatch({
-                    id: `btn_${Date.now()}`,
-                    key: `click_next_${activeStepId}`,
-                    timestamp: Date.now()
-                });
+            const activeId = this.runtime.activeSteps[0];
+            if (!activeId) return;
+
+            // 调试模式日志
+            if (this.config.debug) {
+                console.log(`[FlowPilot] 🖱️ 用户点击“下一步”: ${activeId}`);
             }
+
+            // 触发步骤完成钩子
+            this.config.hooks.onStepComplete?.(activeId);
+
+            const clickPrefix = this.config.runtime.signalPrefix.click;
+            this.runtime.dispatch({
+                id: `btn_${Date.now()}`,
+                key: `${clickPrefix}next_${activeId}`,
+                timestamp: Date.now()
+            });
         });
     }
 
@@ -73,7 +84,24 @@ export class GuideController {
         this.orchestrator.start();
         this.runtime.start();
 
-        // 根据配置决定是否自启
+        const { persistence } = this.config.runtime;
+
+        if (persistence.enabled) {
+            const isFinished = localStorage.getItem(persistence.key);
+            if (isFinished === 'true') {
+                if (this.config.debug) {
+                    console.log(`💤 [FlowPilot] 检查到已通关记录 (${persistence.key})，引导引擎自动休眠。`);
+                }
+                return; // 极速退出，不消耗任何性能，不挂载任何事件！
+            }
+        }
+        if (this.config.debug) {
+            console.log("🚀 [FlowPilot] 引导引擎启动...");
+        }
+        this.collector.mount();
+        this.orchestrator.start();
+        this.runtime.start();
+
         if (this.config.runtime.autoStart && this.runtime.activeSteps.length === 0) {
             this.runtime.dispatch({
                 id: `init_${Date.now()}`,

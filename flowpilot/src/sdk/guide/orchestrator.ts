@@ -12,7 +12,7 @@ export class GuideOrchestrator {
 
     private readonly tracker = new DOMTracker();
     private readonly scheduler = new StepScheduler();
-    private readonly renderer = new GuideRenderer();
+    private readonly renderer: GuideRenderer;
 
     private currentStepId: string | null = null;
     private running = false;
@@ -24,6 +24,7 @@ export class GuideOrchestrator {
         this.runtime = runtime;
         this.stepsMap = new Map(steps.map(s => [s.id, s]));
         this.config = config;
+        this.renderer = new GuideRenderer(this.config);
     }
 
     start() {

@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { FlowEngine } from "../../core/engine";
 import { FlowRuntime } from "../../runtime/runtime";
-import type { Signal, Step } from "../../types";
+import { DEFAULT_CONFIG, Signal, Step } from "../../types";
 
 /**
  * 辅助函数：生成带时间戳的信号
@@ -111,7 +111,7 @@ describe("FlowRuntime Scheduler Killer Tests", () => {
             { id: "B", when: "pay", cancelWhen: "!pay within(2000)" }
         ];
 
-        const runtime = new FlowRuntime({ steps, rootStepId: "A" });
+        const runtime = new FlowRuntime({ steps, rootStepId: "A" , config: DEFAULT_CONFIG });
         runtime.start();
 
         // t=1000 触发开始
@@ -140,7 +140,7 @@ describe("FlowRuntime Scheduler Killer Tests", () => {
             { id: "B", when: "pay", cancelWhen: "!pay within(5000)" }
         ];
 
-        const runtime = new FlowRuntime({ steps, rootStepId: "A" });
+        const runtime = new FlowRuntime({ steps, rootStepId: "A", config: DEFAULT_CONFIG });
         runtime.start();
 
         runtime.dispatch({ id: "s1", key: "start", timestamp: 1000 });
