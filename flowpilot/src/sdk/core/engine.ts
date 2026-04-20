@@ -1,10 +1,17 @@
 // src/sdk/core/engine.ts
 
 import { SignalStore } from "./store";
-import type {Step, Condition, Signal, SequenceCondition, EventCondition} from "../types";
+import { TraceStore } from "../runtime/trace";
+import type {Step, Condition, Signal, SequenceCondition, EventCondition, DiagnosticNode} from "../types";
+
+export interface IndexedEvent {
+    ts: number;
+    id: string;
+}
 
 export class FlowEngine {
     private readonly store = new SignalStore();
+    private readonly trace = new TraceStore();
     private readonly stepsMap: Map<string, Step> = new Map();
 
     // O(1) 的全局事实索引
@@ -14,7 +21,7 @@ export class FlowEngine {
     private readonly activatedAt = new Map<string, number>();
     private readonly completedAt = new Map<string, number>();
 
-    private readonly eventIndex = new Map<string, number[]>();
+    private readonly eventIndex = new Map<string, IndexedEvent[]>();
 
     private readonly activeSteps = new Set<string>();
     private readonly completedSteps = new Set<string>();
@@ -26,6 +33,12 @@ export class FlowEngine {
 
         // 👉 Phase 3: 构造期静态校验，彻底把烂配置挡在门外
         this.validateDAG();
+
+        this.trace.record({
+            type: "ENGINE_INIT",
+            timestamp: 0,
+            meta: { stepsCount: steps.length, rootStepId }
+        });
 
         this.resetState();
     }
@@ -75,6 +88,13 @@ export class FlowEngine {
     private activateStep(stepId: string, timestamp: number) {
         this.activeSteps.add(stepId);
         this.activatedAt.set(stepId, timestamp);
+
+        this.trace.record({
+            type: "STEP_ACTIVATE",
+            timestamp,
+            stepId,
+            activeSteps: [...this.activeSteps]
+        });
     }
 
     // -------------------------
@@ -86,11 +106,15 @@ export class FlowEngine {
             completedSteps: [...this.completedSteps],
             factMap: Object.fromEntries(this.factMap),
             activatedAt: Object.fromEntries(this.activatedAt),
-            eventCount: this.store.getEvents().length
+            eventCount: this.store.getEvents().length,
+            trace: this.trace.all()
         };
     }
 
+    getTrace() { return this.trace; }
+
     getActiveSteps() { return [...this.activeSteps]; }
+
     getCompletedSteps() { return [...this.completedSteps]; }
 
     // -------------------------
@@ -100,6 +124,15 @@ export class FlowEngine {
         if (signal.timestamp == null) {
             throw new Error("[FlowPilot Engine] Critical: Signal must have a timestamp to guarantee determinism.");
         }
+
+        this.trace.record({
+            type: "SIGNAL_INGEST",
+            timestamp: signal.timestamp,
+            signalId: signal.id,
+            key: signal.key,
+            activeSteps: [...this.activeSteps]
+        });
+
         // 核心：若 store 拦截了重复信号，直接短路返回
         const inserted = this.store.push(signal);
         if (!inserted) return;
@@ -114,9 +147,14 @@ export class FlowEngine {
         this.factMap.set(signal.key, count + 1);
 
         this.updateIndex(signal);
+
+        this.trace.record({
+            type: "FACT_APPLIED",
+            timestamp: signal.timestamp,
+            key: signal.key,
+            signalId: signal.id
+        });
     }
-
-
 
     private updateIndex(signal: Signal) {
         let list = this.eventIndex.get(signal.key);
@@ -125,21 +163,26 @@ export class FlowEngine {
             this.eventIndex.set(signal.key, list);
         }
 
-        const ts = signal.timestamp;
+        // 1. 创建符合 IndexedEvent 接口的对象
+        const item: IndexedEvent = { ts: signal.timestamp, id: signal.id };
 
         const len = list.length;
-        if (len === 0 || list[len - 1] <= ts) {
-            list.push(ts);
+
+        // 2. 修正比较逻辑：必须访问 list[len - 1].ts
+        // 3. 修正存储逻辑：必须 push(item) 对象
+        if (len === 0 || list[len - 1].ts <= item.ts) {
+            list.push(item);
             return;
         }
 
-        let i = list.length - 1;
-        // 从尾部往前找插入点
-        while (i >= 0 && list[i] > ts) {
+        // 4. 修正插入排序逻辑：从尾部向前查找时也需要访问 .ts
+        let i = len - 1;
+        while (i >= 0 && list[i].ts > item.ts) {
             i--;
         }
 
-        list.splice(i + 1, 0, ts);
+        // 在正确的位置插入对象
+        list.splice(i + 1, 0, item);
     }
 
     // -------------------------
@@ -164,6 +207,15 @@ export class FlowEngine {
                 if (!step) continue;
 
                 if (this.evaluate(step.when, stepId)) {
+
+                    this.trace.record({
+                        type: "STEP_ADVANCE",
+                        timestamp: currentEventTs,
+                        stepId,
+                        toStep: step.next?.join(','),
+                        meta: { conditionType: step.when.type }
+                    });
+
                     this.completedSteps.add(stepId);
                     this.activeSteps.delete(stepId);
 
@@ -183,12 +235,12 @@ export class FlowEngine {
     }
 
     // 工业级二分查找底座
-    private lowerBound(list: number[], target: number): number {
+    private lowerBound(list: IndexedEvent[], target: number): number {
         let l = 0;
         let r = list.length;
         while (l < r) {
             const mid = (l + r) >> 1;
-            if (list[mid] < target) l = mid + 1;
+            if (list[mid].ts < target) l = mid + 1;
             else r = mid;
         }
         return l;
@@ -215,12 +267,12 @@ export class FlowEngine {
         if (cond.within) {
             if (requiredCount === 1) {
                 // 单次事件：必须在 cutoff 之后的 within 时间内发生
-                return list[start] - cutoff <= cond.within;
+                return list[start].ts - cutoff <= cond.within;
             } else {
                 // 👉 修正雷区：滑动窗口！寻找任意连续 requiredCount 个事件是否都在 within 窗口内
                 for (let i = start; i <= list.length - requiredCount; i++) {
-                    const firstTs = list[i];
-                    const lastTs = list[i + requiredCount - 1];
+                    const firstTs = list[i].ts;
+                    const lastTs = list[i + requiredCount - 1].ts;
                     if (lastTs - firstTs <= cond.within) {
                         return true;
                     }
@@ -245,7 +297,7 @@ export class FlowEngine {
             const idx = this.lowerBound(list, currentTs);
             if (idx >= list.length) return false;
 
-            const ts = list[idx];
+            const ts = list[idx].ts;
 
             // Sequence 的 within 语义：整个序列的最后一个事件必须在 cutoff 后的 within 毫秒内完成
             if (cond.within && ts - cutoff > cond.within) {
@@ -274,6 +326,147 @@ export class FlowEngine {
                 return false;
         }
     }
+
+    /**
+     * 对特定步骤的条件进行深度扫描，返回诊断树
+     */
+    public explain(stepId: string): DiagnosticNode | null {
+        const step = this.stepsMap.get(stepId);
+        if (!step) return null;
+        return this.traceCondition(step.when, stepId);
+    }
+
+    private traceCondition(cond: Condition, stepId: string): DiagnosticNode {
+        switch (cond.type) {
+            case "event":
+                return this.traceEvent(cond, stepId);
+            case "sequence":
+                return this.traceSequence(cond, stepId);
+            case "and": {
+                const results = cond.conditions.map(c => this.traceCondition(c, stepId));
+                return {
+                    type: "and",
+                    passed: results.every(r => r.passed),
+                    reason: results.every(r => r.passed) ? "ALL_MET" : "SOME_CONDITIONS_FAILED",
+                    children: results
+                };
+            }
+            case "or": {
+                const results = cond.conditions.map(c => this.traceCondition(c, stepId));
+                return {
+                    type: "or",
+                    passed: results.some(r => r.passed),
+                    reason: results.some(r => r.passed) ? "ANY_MET" : "ALL_CONDITIONS_FAILED",
+                    children: results
+                };
+            }
+        }
+    }
+
+    private traceEvent(cond: EventCondition, currentStepId: string): DiagnosticNode {
+        const referenceStepId = cond.afterStep || currentStepId;
+        const cutoff = this.activatedAt.get(referenceStepId) ?? 0;
+        const list = this.eventIndex.get(cond.key) || [];
+        const start = this.lowerBound(list, cutoff);
+        const availableEvents = list.slice(start);
+
+        const requiredCount = cond.count || 1;
+        const hasEnoughCount = availableEvents.length >= requiredCount;
+
+        // 检查滑动窗口
+        let windowPassed = true;
+        let actualElapsed = 0;
+        if (hasEnoughCount && cond.within) {
+            windowPassed = false;
+            for (let i = 0; i <= availableEvents.length - requiredCount; i++) {
+                const elapsed = availableEvents[i + requiredCount - 1].ts - availableEvents[i].ts;
+                if (elapsed <= cond.within) {
+                    windowPassed = true;
+                    break;
+                }
+                actualElapsed = elapsed; // 记录最后一个尝试的间隔供参考
+            }
+        }
+
+        const passed = hasEnoughCount && windowPassed;
+
+        if(!hasEnoughCount) {
+            return {
+                type: "event",
+                passed,
+                reason: "COUNT_NOT_MET",
+                details: {
+                    key: cond.key,
+                    current: availableEvents.length,
+                    required: requiredCount,
+                    elapsed: actualElapsed,
+                    limit: cond.within
+                }
+            };
+        }
+
+        return {
+            type: "event",
+            passed,
+            reason: windowPassed ? "CONDITION_MET" : "TIME_WINDOW_EXCEEDED",
+            details: {
+                key: cond.key,
+                current: availableEvents.length,
+                required: requiredCount,
+                elapsed: actualElapsed,
+                limit: cond.within
+            }
+        };
+    }
+
+    private traceSequence(cond: SequenceCondition, currentStepId: string): DiagnosticNode {
+        const referenceStepId = cond.afterStep || currentStepId;
+        const cutoff = this.activatedAt.get(referenceStepId) ?? 0;
+        let currentTs = cutoff;
+        let lastTs = cutoff;
+        let failedAtKey: string | null = null;
+
+        for (const key of cond.keys) {
+            const list = this.eventIndex.get(key) || [];
+            const idx = this.lowerBound(list, currentTs);
+            if (idx >= list.length) {
+                failedAtKey = key;
+                break;
+            }
+            lastTs = list[idx].ts;
+            currentTs = lastTs + 1;
+        }
+
+        const timeInWindow = cond.within ? (lastTs - cutoff <= cond.within) : true;
+        const passed = !failedAtKey && timeInWindow;
+
+        if(failedAtKey) {
+            return {
+                type: "sequence",
+                passed,
+                reason:  `BROKEN_AT_${failedAtKey}`,
+                details: {
+                    keys: cond.keys,
+                    failedAt: failedAtKey,
+                    totalElapsed: lastTs - cutoff,
+                    limit: cond.within
+                }
+            };
+        }
+
+        return {
+            type: "sequence",
+            passed,
+            reason: timeInWindow ? "SEQUENCE_MET" : "SEQUENCE_TIMEOUT",
+            details: {
+                keys: cond.keys,
+                failedAt: failedAtKey,
+                totalElapsed: lastTs - cutoff,
+                limit: cond.within
+            }
+        };
+    }
+
     // -------------------------
     // RECOMPUTE & REVERT (时空回溯)
     // -------------------------
@@ -299,6 +492,12 @@ export class FlowEngine {
      * 语义：抹除 targetTs 之后发生的所有“未来事件”
      */
     revertToTime(targetTs: number) {
+        this.trace.record({
+            type: "REVERT",
+            timestamp: Date.now(),
+            meta: { targetTs }
+        });
+
         const events = [...this.store.getEvents()];
 
         const validEvents = events.filter(e => e.timestamp <= targetTs);
