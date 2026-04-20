@@ -1,100 +1,89 @@
 // src/sdk/runtime/runtime.ts
 
 import { FlowEngine } from "../core/engine";
-import { TraceStore } from "./trace";
-import { FlowReplayer } from "./replay";
-
 import type { Step, Signal } from "../types";
 
 export interface RuntimeOptions {
     steps: Step[];
     rootStepId: string;
-    enableTrace?: boolean;
+    // 调度器心跳频率 (毫秒)
+    tickInterval?: number;
 }
 
 /**
- * Runtime = 唯一对外入口
- * 负责将复杂的 Engine 状态包装为 UI 可用的高级接口，并管理 Trace 审计日志
+ * FlowRuntime (V2)
+ * 核心职责：作为唯一对外的高级 API 入口，接管真实时间驱动，激活 Temporal 时间轴
  */
 export class FlowRuntime {
     private readonly engine: FlowEngine;
-    private readonly trace?: TraceStore;
     private readonly options: RuntimeOptions;
+
+    private ticker: any = null;
 
     constructor(options: RuntimeOptions) {
         this.options = options;
-        // 修复报错：传入 steps 和 rootStepId
+
+        // 1. 初始化 V2 纯净内核（内部自带了 Trace 和预编译闭包）
         this.engine = new FlowEngine(options.steps, options.rootStepId);
-
-        if (options.enableTrace) {
-            this.trace = new TraceStore();
-        }
-
-        this.log({
-            type: "ENGINE_INIT",
-            timestamp: Date.now(),
-            activeSteps: this.engine.getActiveSteps()
-        });
-    }
-
-    /**
-     * 注入信号并记录状态迁移轨迹
-     */
-    ingest(signal: Signal) {
-        const before = this.engine.getActiveSteps();
-
-        this.log({
-            type: "SIGNAL_INGEST",
-            timestamp: Date.now(),
-            signalId: signal.id,
-            key: signal.key,
-            activeSteps: before
-        });
-
-        this.engine.ingest(signal);
-
-        const after = this.engine.getActiveSteps();
-
-        if (JSON.stringify(before) !== JSON.stringify(after)) {
-            this.log({
-                type: "STEP_ADVANCE",
-                timestamp: Date.now(),
-                from: before,
-                to: after
-            });
-        }
-    }
-
-    /**
-     * 回滚到指定步骤
-     * @param stepId 目标步骤 ID
-     */
-    revert(stepId: string) {
-        const before = this.engine.getActiveSteps();
-
-        this.engine.revert(stepId);
-
-        const after = this.engine.getActiveSteps();
-
-        this.log({
-            type: "REVERT",
-            timestamp: Date.now(),
-            targetStep: stepId,
-            from: before,
-            to: after
-        });
-    }
-
-    /**
-     * 确定性重放
-     */
-    replay(signals: Signal[]) {
-        // 修复报错：传入必须的 rootStepId
-        return FlowReplayer.replay(this.options.steps, signals, this.options.rootStepId);
     }
 
     // -------------------------
-    // 状态获取
+    // ⏰ 时间调度器 (Scheduler)
+    // -------------------------
+
+    /**
+     * 启动工作流：让时间流逝真正介入状态机
+     */
+    start() {
+        if (this.ticker) return;
+
+        const interval = this.options.tickInterval || 1000; // 默认 1 秒滴答一次
+
+        // 赋予绝对起跑时间
+        this.engine.tick(Date.now());
+
+        // 启动心跳，自动触发 cancelWhen 等超时校验
+        this.ticker = setInterval(() => {
+            this.engine.tick(Date.now());
+        }, interval);
+
+        console.log(`[FlowRuntime] Started with tick interval ${interval}ms`);
+    }
+
+    /**
+     * 暂停调度
+     */
+    stop() {
+        if (this.ticker) {
+            clearInterval(this.ticker);
+            this.ticker = null;
+            console.log("[FlowRuntime] Stopped");
+        }
+    }
+
+    // -------------------------
+    // 🚀 核心交互 API
+    // -------------------------
+
+    /**
+     * 发送业务信号（UI 层只需要传 id 和 key，时间戳由 Runtime 自动打上绝对时间）
+     */
+    dispatch(signal: Omit<Signal, 'timestamp'>) {
+        this.engine.ingest({
+            ...signal,
+            timestamp: Date.now() // 强制统一现实时间
+        });
+    }
+
+    /**
+     * 时空回溯：回滚到目标步骤完成那一刻
+     */
+    revert(stepId: string) {
+        this.engine.revert(stepId);
+    }
+
+    // -------------------------
+    // 📊 状态读取与诊断
     // -------------------------
 
     get activeSteps() {
@@ -106,16 +95,16 @@ export class FlowRuntime {
     }
 
     /**
-     * 提供给 Debug 面板的完整快照
+     * 获取完整引擎快照与 V2 底层 Trace 日志
      */
     debug() {
-        return {
-            ...this.engine.inspect(),
-            trace: this.trace?.all() ?? []
-        };
+        return this.engine.inspect();
     }
 
-    private log(event: any) {
-        this.trace?.record(event);
+    /**
+     * 对外暴露引擎实例（高级用法）
+     */
+    getEngine() {
+        return this.engine;
     }
 }

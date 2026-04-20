@@ -32,6 +32,8 @@ export class FlowEngine {
 
     private readonly rootStepId: string;
 
+    private readonly evalCtx: EvalContext;
+
     constructor(steps: Step[], rootStepId: string) {
         steps.forEach(rawStep => {
             // 1. 解析阶段：DSL 字符串 -> AST
@@ -59,6 +61,16 @@ export class FlowEngine {
             meta: {stepsCount: steps.length, rootStepId}
         });
 
+        this.evalCtx = {
+            factMap: this.factMap,
+            eventIndex: this.eventIndex,
+            activatedAt: this.activatedAt,
+            completedSteps: this.completedSteps,
+            currentStepId: "",
+            currentEventTs: 0,
+            lowerBound: this.lowerBound.bind(this)
+        };
+
         this.resetState();
     }
 
@@ -83,15 +95,9 @@ export class FlowEngine {
      * 每次判定时，动态生成传递给闭包的只读上下文
      */
     private buildContext(stepId: string, currentEventTs: number): EvalContext {
-        return {
-            factMap: this.factMap,
-            eventIndex: this.eventIndex,
-            activatedAt: this.activatedAt,
-            completedSteps: this.completedSteps,
-            currentStepId: stepId,
-            currentEventTs,
-            lowerBound: this.lowerBound.bind(this)
-        };
+        this.evalCtx.currentStepId = stepId;
+        this.evalCtx.currentEventTs = currentEventTs;
+        return this.evalCtx;
     }
 
     /**

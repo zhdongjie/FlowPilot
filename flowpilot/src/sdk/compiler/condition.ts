@@ -1,7 +1,7 @@
 // src/sdk/compiler/condition.ts
 
 import type { Condition, EventCondition, SequenceCondition, NotCondition } from "../types";
-import type { CompiledCondition, EvalContext } from "../types/runtime";
+import type { CompiledCondition, EvalContext } from "../types";
 
 export class ConditionCompiler {
 
@@ -15,12 +15,12 @@ export class ConditionCompiler {
             case "sequence":
                 return this.compileSequence(cond);
             case "after":
-                return (ctx) => ctx.completedSteps.has(cond.stepId);
+                return (ctx: EvalContext) => ctx.completedSteps.has(cond.stepId);
             case "not":
                 return this.compileNot(cond);
             case "and": {
                 const children = cond.conditions.map(c => this.compile(c));
-                return (ctx) => {
+                return (ctx: EvalContext) => {
                     // 短路求值：任何一个失败则整体失败
                     for (const fn of children) {
                         if (!fn(ctx)) return false;
@@ -30,7 +30,7 @@ export class ConditionCompiler {
             }
             case "or": {
                 const children = cond.conditions.map(c => this.compile(c));
-                return (ctx) => {
+                return (ctx: EvalContext) => {
                     // 短路求值：任何一个成功则整体成功
                     for (const fn of children) {
                         if (fn(ctx)) return true;
@@ -112,7 +112,7 @@ export class ConditionCompiler {
                 // 只要在窗口内发生过，NOT 直接判定失败
                 if (happened) return false;
 
-                // 如果没发生，且时间已经越过了窗口，NOT 判定成功！
+                // 如果没发生，且绝对时间已经越过了窗口，NOT 判定成功！
                 return ctx.currentEventTs - cutoff > c.within;
             }
 
