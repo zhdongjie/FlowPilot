@@ -129,4 +129,15 @@ export class FlowRuntime {
         }
     }
 
+    /** 👉 获取引擎的实时事件流 */
+    public getTraceStream() {
+        return this.engine.getTraceStore();
+    }
+
+    /** 👉 提供给 DevTools 的上帝模式：绝对时间轴回放 */
+    public revertToTime(targetTs: number) {
+        this.engine.revertToTime(targetTs);
+        this.scheduleNext(); // 回放后时间轴变了，重新排期定时器
+    }
+
 }

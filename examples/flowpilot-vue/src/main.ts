@@ -94,5 +94,7 @@ const guide = new GuideController({
 // 🚀 启动引擎
 guide.start();
 
+(window as any).__FLOW_GUIDE__ = guide;
+
 // 挂载 Vue (看！Vue 组件完全不知道 FlowPilot 的存在)
 app.mount('#app')

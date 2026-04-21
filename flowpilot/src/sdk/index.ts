@@ -12,6 +12,9 @@ export type { GuideStep } from "./types/guide";
 export { AxiosAdapter } from "./collector/adapters";
 export type { NetworkAdapter, EmitFunction } from "./types/collector";
 
+export { FlowDevTools } from './devtools/controller';
+export type { FlowRuntime } from './runtime/runtime';
+
 // 定义用户可能传入的带字符串语法糖的 Step
 export interface DslStep extends Omit<Step, 'when'> {
     when: string | Condition;

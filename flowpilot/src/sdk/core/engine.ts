@@ -648,18 +648,25 @@ export class FlowEngine {
      * 语义：抹除 targetTs 之后发生的所有“未来事件”
      */
     revertToTime(targetTs: number) {
+        // 1. 筛选出目标时间点之前的有效信号
+        const events = [...this.store.getEvents()];
+        const validEvents = events.filter(e => e.timestamp <= targetTs);
+
+        // 2. 🌟 挥刀斩断时间线：删掉未来的日志
+        this.trace.truncate(targetTs);
+
+        // 3. 🌟 刻上时光穿梭的烙印
         this.trace.record({
             type: "REVERT",
             timestamp: Date.now(),
-            meta: {targetTs}
+            meta: { targetTs }
         });
 
-        const events = [...this.store.getEvents()];
-
-        const validEvents = events.filter(e => e.timestamp <= targetTs);
-
+        // 4. 🌟 底层状态机静默读档！(必须静音，否则 replay 会产生海量重复日志)
         this.store.clear();
+        this.trace.mute();   // 开启静音
         this.replay(validEvents);
+        this.trace.unmute(); // 读档完毕，解除静音
     }
 
     revert(targetStepId: string) {
@@ -701,6 +708,10 @@ export class FlowEngine {
         } else {
             console.warn(`[FlowPilot Engine] forceComplete failed: Step '${stepId}' not found.`);
         }
+    }
+
+    public getTraceStore() {
+        return this.trace;
     }
 
 }

@@ -1,5 +1,7 @@
 // src/sdk/runtime/trace.ts
 
+import { EventEmitter } from "../devtools/emitter.ts";
+
 /**
  * 规则：
  * - 只记录，不参与计算
@@ -42,11 +44,18 @@ export interface TraceEvent {
 export class TraceStore {
     private logs: TraceEvent[] = [];
 
+    private readonly emitter = new EventEmitter<TraceEvent>();
+
+    private isMuted = false;
+
     // -----------------------------
     // write
     // -----------------------------
     record(event: TraceEvent) {
+        if (this.isMuted) return;
+
         this.logs.push(event);
+        this.emitter.emit(event);
     }
 
     // -----------------------------
@@ -109,4 +118,17 @@ export class TraceStore {
 
         return map;
     }
+
+    truncate(targetTs: number) {
+        this.logs = this.logs.filter(e => e.timestamp <= targetTs);
+    }
+
+    subscribe(fn: (event: TraceEvent) => void) {
+        return this.emitter.subscribe(fn);
+    }
+
+    mute() { this.isMuted = true; }
+
+    unmute() { this.isMuted = false; }
+
 }

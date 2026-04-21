@@ -10,5 +10,9 @@ export default defineConfig({
             // 🌟 魔法在这里：拦截 'flowpilot' 的导入，直接指向本地 SDK 源码
             'flowpilot': path.resolve(__dirname, '../../flowpilot/src/sdk/index.ts')
         }
+    },
+    server: {
+        port: 8080,
+        strictPort: false
     }
 })
