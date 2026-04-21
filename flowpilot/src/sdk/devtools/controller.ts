@@ -13,6 +13,7 @@ export class FlowDevTools {
 
     // 🌟 核心：影子引擎（平行宇宙），专供沙盘推演和诊断获取，绝对隔离
     private debugEngine: FlowEngine | null = null;
+    private hoveredEventKey: string | null = null;
 
     /**
      * 连接到真实环境的 Runtime
@@ -95,5 +96,16 @@ export class FlowDevTools {
         // 回拨真实世界的时间，触发真实 runtime 的 stateEmitter 广播
         // 然后 DevTools 监听到广播后，又会自动执行 syncFromRealWorld
         runtime.revertToTime(targetTs);
+    }
+
+    setHoveredEventKey(key: string | null) {
+        this.hoveredEventKey = key;
+
+        // 🌟 广播，让 DAG / Timeline 同步刷新
+        this.emitter.emit();
+    }
+
+    getHoveredEventKey() {
+        return this.hoveredEventKey;
     }
 }

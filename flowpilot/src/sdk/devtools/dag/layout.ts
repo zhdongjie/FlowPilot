@@ -1,17 +1,34 @@
-// src/sdk/devtools/dag/layout.ts
-
 import type { Graph, GraphNode } from "./types";
+import {LayoutResult} from "./layout-types.ts";
 
-export function layoutGraph(graph: Graph, canvasWidth: number): GraphNode[] {
+/**
+ * 🌟 工业级 DAG 布局算法
+ * 基于入度(In-Degree)计算拓扑层级，并进行水平居中对齐
+ */
+export function layoutGraph(graph: Graph, canvasWidth: number): LayoutResult {
     const { nodes, edges, rootId } = graph;
-    if (nodes.length === 0 || !rootId) return nodes;
+    if (nodes.length === 0) {
+        return {
+            nodes: [],
+            nodeWidth: 130,
+            nodeHeight: 36
+        };
+    }
+
+    const nodeWidth = 130;
+    const nodeHeight = 36;
+    const gapX = 25;
+    const gapY = 70;
+    const paddingY = 40;
+
+    const positionedNodes: GraphNode[] = nodes.map(n => ({ ...n }));
+
 
     const levelMap = new Map<string, number>();
     const inDegree = new Map<string, number>();
     const childrenMap = new Map<string, string[]>();
 
-    // 1. 初始化入度与子节点映射
-    nodes.forEach(n => {
+    positionedNodes.forEach(n => {
         inDegree.set(n.id, 0);
         childrenMap.set(n.id, []);
     });
@@ -21,49 +38,64 @@ export function layoutGraph(graph: Graph, canvasWidth: number): GraphNode[] {
         childrenMap.get(e.from)?.push(e.to);
     });
 
-    // 2. 拓扑排序计算真正的深度 (DAG 核心算法)
-    levelMap.set(rootId, 0);
-    const queue = [rootId];
+    const queue: string[] = [];
+
+    if (rootId && inDegree.has(rootId)) {
+        queue.push(rootId);
+        levelMap.set(rootId, 0);
+    } else {
+        positionedNodes.forEach(n => {
+            if (inDegree.get(n.id) === 0) {
+                queue.push(n.id);
+                levelMap.set(n.id, 0);
+            }
+        });
+    }
 
     while (queue.length > 0) {
         const curr = queue.shift()!;
-        const currLevel = levelMap.get(curr)!;
+        const currLevel = levelMap.get(curr) || 0;
 
-        const children = childrenMap.get(curr) || [];
-        for (const child of children) {
-            // 🌟 核心：DAG 节点的层级 = max(当前已知层级, 父层级 + 1)
-            const nextLevel = Math.max(levelMap.get(child) || 0, currLevel + 1);
-            levelMap.set(child, nextLevel);
+        for (const childId of childrenMap.get(curr) || []) {
+            const nextLevel = Math.max(levelMap.get(childId) || 0, currLevel + 1);
+            levelMap.set(childId, nextLevel);
 
-            inDegree.set(child, inDegree.get(child)! - 1);
-            // 入度清零时入队
-            if (inDegree.get(child) === 0) {
-                queue.push(child);
+            const deg = (inDegree.get(childId) || 0) - 1;
+            inDegree.set(childId, deg);
+
+            if (deg === 0) {
+                queue.push(childId);
             }
         }
     }
 
-    // 3. 按 level 分配坐标计算
-    const levelGroups: Record<number, GraphNode[]> = {};
-    for (const node of nodes) {
-        const level = levelMap.get(node.id) || 0;
-        if (!levelGroups[level]) levelGroups[level] = [];
-        levelGroups[level].push(node);
-    }
+    // 分组
+    const levelGroups = new Map<number, GraphNode[]>();
 
-    const gapY = 70;
-    const nodeWidth = 130;
-    const gapX = 20;
+    positionedNodes.forEach(node => {
+        const level = levelMap.get(node.id) ?? 0;
+        if (!levelGroups.has(level)) {
+            levelGroups.set(level, []);
+        }
+        levelGroups.get(level)!.push(node);
+    });
 
-    Object.entries(levelGroups).forEach(([levelStr, group]) => {
-        const level = Number(levelStr);
-        const groupWidth = group.length * nodeWidth + (group.length - 1) * gapX;
-        const startX = (canvasWidth - groupWidth) / 2;
+    // 排序 + 布局
+    levelGroups.forEach((group, level) => {
+        group.sort((a, b) => a.id.localeCompare(b.id));
 
-        group.forEach((node, index) => {
-            node.x = startX + index * (nodeWidth + gapX);
-            node.y = 20 + level * gapY;
+        const totalWidth = group.length * nodeWidth + (group.length - 1) * gapX;
+        const startX = (canvasWidth - totalWidth) / 2;
+
+        group.forEach((node, i) => {
+            node.x = startX + i * (nodeWidth + gapX);
+            node.y = paddingY + level * gapY;
         });
     });
-    return nodes;
+
+    return {
+        nodes: positionedNodes,
+        nodeWidth,
+        nodeHeight
+    };
 }
