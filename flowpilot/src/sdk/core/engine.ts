@@ -403,11 +403,11 @@ export class FlowEngine {
     // ✅ 完成判定
     private tryCompleteStep(step: ParsedStep, stepId: string, currentEventTs: number): boolean {
         const ctx = this.buildContext(stepId, currentEventTs);
-        // 👉 O(1) 闭包调用！
-        if (!step.compiledWhen || !step.compiledWhen(ctx)) {
+        if (!step.compiledWhen?.(ctx)) {
             return false;
         }
 
+        // 🌟 1. 记录日志（此时 DAG 还能拿到 passed: true 的状态）
         this.trace.record({
             type: "STEP_ADVANCE",
             timestamp: currentEventTs,
@@ -420,7 +420,10 @@ export class FlowEngine {
         this.activeSteps.delete(stepId);
         this.completedAt.set(stepId, currentEventTs);
 
-        this.activateNextSteps(step.next);
+        setTimeout(() => {
+            this.activateNextSteps(step.next);
+            this.evaluateLoop(Date.now());
+        }, 100);
         return true;
     }
 

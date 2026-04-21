@@ -15,6 +15,9 @@ export type { NetworkAdapter, EmitFunction } from "./types/collector";
 export { FlowDevTools } from './devtools/controller';
 export type { FlowRuntime } from './runtime/runtime';
 
+export { DAGRenderer } from "./devtools/dag/renderer";
+export { buildGraph } from "./devtools/dag/builder";
+
 // 定义用户可能传入的带字符串语法糖的 Step
 export interface DslStep extends Omit<Step, 'when'> {
     when: string | Condition;

@@ -68,10 +68,28 @@ const handleGoBack = () => {
   // 1. 业务层面：隐藏表单，退回工作台
   showForm.value = false;
 
-  // 2. 引导层面：呼叫 SDK 截断记忆并重启
-  // ⚠️ 这里的 'step_open_account' 是我要开户那一步的 ID，若你的 config 命名不同请修改
-  if ((window as any).__FLOW_GUIDE__) {
-    (window as any).__FLOW_GUIDE__.rewindTo('step_open_account');
+  // 2. 引导层面：呼叫 SDK 回溯
+  const runtime = (window as any).__FLOW_GUIDE__;
+
+  if (runtime && runtime.engine) {
+    const targetStepId = 'step_open_account';
+
+    // 🌟 核心逻辑：从 Trace 记录中找到该步骤激活的那个瞬间
+    const traceLogs = runtime.engine.getTrace().all();
+    const activateEvent = traceLogs.find(
+        (e: any) => e.type === 'STEP_ACTIVATE' && e.stepId === targetStepId
+    );
+
+    if (activateEvent) {
+      console.log(`[App] ⏪ 正在回溯至步骤 ${targetStepId}，时间点: ${activateEvent.timestamp}`);
+
+      // ✅ 使用正确的方法名：revertToTime
+      runtime.engine.revertToTime(activateEvent.timestamp);
+    } else {
+      // 如果没找到记录（比如还没走到那一步），则尝试重置到初始状态
+      console.warn(`[App] 未找到步骤 ${targetStepId} 的激活记录，执行重置`);
+      runtime.engine.revertToTime(0);
+    }
   }
 }
 

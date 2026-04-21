@@ -4,7 +4,7 @@ import type { GuideStep } from "flowpilot";
 export const onboardingSteps: GuideStep[] = [
     {
         id: "step_login",
-        when: "login_success",
+        when: "focus_login_btn && login_success",
         next: ["step_dashboard"],
         ui: {
             selector: "#login-btn",

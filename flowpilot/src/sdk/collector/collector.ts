@@ -14,11 +14,6 @@ export class BehaviorCollector {
         this.dom = new DOMCollector(config.runtime);
         const adapters = config.adapters || [];
 
-        if (adapters.length > 0) {
-            adapters.forEach(adapter => {
-                adapter.install(this.emit.bind(this));
-            });
-        }
         this.net = new NetworkCollector(adapters);
     }
 
@@ -30,6 +25,8 @@ export class BehaviorCollector {
     }
 
     private emit(signal: { key: string; meta?: any }) {
+        console.log(`🔌 [BehaviorCollector] 收到信号准备发射 ->`, signal.key);
+
         this.runtime.dispatch({
             id: `sig_${Date.now()}_${Math.random().toString(36).substring(7)}`,
             key: signal.key,
