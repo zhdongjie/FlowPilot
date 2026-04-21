@@ -1,16 +1,12 @@
 // src/sdk/devtools/dag/builder.ts
 import type { Graph, GraphNode, GraphEdge } from "./types";
 
-let idCounter = 0;
-const genId = () => `node_${idCounter++}`;
-
 export function buildGraph(diagnosticRoot: any, stepId?: string): Graph {
-    idCounter = 0;
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
 
     function walk(node: any): string {
-        const currentId = genId();
+        const currentId = crypto.randomUUID(); // 🌟 替换全局 ID 计数器，防止并发冲突
 
         let label = node.type.toUpperCase();
         if (node.type === 'event') label = node.details?.key || 'EVENT';
@@ -22,7 +18,8 @@ export function buildGraph(diagnosticRoot: any, stepId?: string): Graph {
             label,
             type: node.type,
             passed: node.passed,
-            reason: node.reason
+            reason: node.reason,
+            meta: node.details // 🌟 挂载所有的底层元数据
         });
 
         if (node.children && node.children.length > 0) {
@@ -34,10 +31,11 @@ export function buildGraph(diagnosticRoot: any, stepId?: string): Graph {
         return currentId;
     }
 
+    let rootId = "";
     if (diagnosticRoot) {
         // 如果我们传了 stepId，并且根节点不是逻辑操作符，我们人为地给它包一层
         if (stepId && !['and', 'or', 'not'].includes(diagnosticRoot.type)) {
-            const rootId = genId();
+            rootId = crypto.randomUUID();
             nodes.push({
                 id: rootId,
                 label: `STEP: ${stepId}`,
@@ -48,8 +46,9 @@ export function buildGraph(diagnosticRoot: any, stepId?: string): Graph {
             const childId = walk(diagnosticRoot);
             edges.push({ from: rootId, to: childId });
         } else {
-            walk(diagnosticRoot);
+            rootId = walk(diagnosticRoot);
         }
     }
-    return { nodes, edges };
+
+    return { nodes, edges, rootId };
 }

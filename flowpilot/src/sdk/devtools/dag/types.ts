@@ -8,6 +8,7 @@ export interface GraphNode {
     reason?: string;
     x?: number;
     y?: number;
+    meta?: any; // 🌟 财富密码：保留底层引擎的 details 数据
 }
 export interface GraphEdge {
     from: string;
@@ -16,4 +17,5 @@ export interface GraphEdge {
 export interface Graph {
     nodes: GraphNode[];
     edges: GraphEdge[];
+    rootId: string; // 🌟 显式声明根节点入口
 }

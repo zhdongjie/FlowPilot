@@ -3,23 +3,47 @@
 import type { Graph, GraphNode } from "./types";
 
 export function layoutGraph(graph: Graph, canvasWidth: number): GraphNode[] {
+    const { nodes, edges, rootId } = graph;
+    if (nodes.length === 0 || !rootId) return nodes;
+
     const levelMap = new Map<string, number>();
-    const nodes = graph.nodes;
-    if (nodes.length === 0) return nodes;
+    const inDegree = new Map<string, number>();
+    const childrenMap = new Map<string, string[]>();
 
-    function assignLevels() {
-        const visited = new Set<string>();
-        function dfs(nodeId: string, level: number) {
-            if (visited.has(nodeId)) return;
-            visited.add(nodeId);
-            levelMap.set(nodeId, level);
-            const children = graph.edges.filter(e => e.from === nodeId).map(e => e.to);
-            for (const child of children) dfs(child, level + 1);
+    // 1. 初始化入度与子节点映射
+    nodes.forEach(n => {
+        inDegree.set(n.id, 0);
+        childrenMap.set(n.id, []);
+    });
+
+    edges.forEach(e => {
+        inDegree.set(e.to, (inDegree.get(e.to) || 0) + 1);
+        childrenMap.get(e.from)?.push(e.to);
+    });
+
+    // 2. 拓扑排序计算真正的深度 (DAG 核心算法)
+    levelMap.set(rootId, 0);
+    const queue = [rootId];
+
+    while (queue.length > 0) {
+        const curr = queue.shift()!;
+        const currLevel = levelMap.get(curr)!;
+
+        const children = childrenMap.get(curr) || [];
+        for (const child of children) {
+            // 🌟 核心：DAG 节点的层级 = max(当前已知层级, 父层级 + 1)
+            const nextLevel = Math.max(levelMap.get(child) || 0, currLevel + 1);
+            levelMap.set(child, nextLevel);
+
+            inDegree.set(child, inDegree.get(child)! - 1);
+            // 入度清零时入队
+            if (inDegree.get(child) === 0) {
+                queue.push(child);
+            }
         }
-        dfs(nodes[0].id, 0);
     }
-    assignLevels();
 
+    // 3. 按 level 分配坐标计算
     const levelGroups: Record<number, GraphNode[]> = {};
     for (const node of nodes) {
         const level = levelMap.get(node.id) || 0;

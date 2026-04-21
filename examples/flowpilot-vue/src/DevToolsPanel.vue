@@ -8,7 +8,11 @@
           <span class="pulse-icon">🔍</span>
           正在阻塞: <span class="step-name">{{ diag.stepId }}</span>
         </div>
-        <DevToolsDAG :diagnosticTree="diag.tree" :stepId="diag.stepId" />
+        <DevToolsDAG
+            :diagnosticTree="diag.tree"
+            :stepId="diag.stepId"
+            :activeEventKey="hoveredEventKey"
+        />
       </div>
     </div>
     <div v-else class="finish-panel">
@@ -19,7 +23,13 @@
     <div class="timeline">
       <div v-if="events.length === 0" class="empty">等待引擎数据...</div>
 
-      <div v-for="(event, index) in events" :key="index" class="event-card">
+      <div
+          v-for="(event, index) in events"
+          :key="index"
+          class="event-card"
+          @mouseenter="hoveredEventKey = event.key"
+          @mouseleave="hoveredEventKey = null"
+      >
         <div class="event-time">{{ formatTime(event.timestamp) }}</div>
 
         <div class="event-body">
@@ -56,13 +66,16 @@ const events = ref<any[]>([]);
 const activeDiagnostics = ref<any[]>([]);
 let switchTimer: any = null;
 
+// 🌟 新增：追踪当前鼠标在时间轴上悬停的事件 Key
+const hoveredEventKey = ref<string | null>(null);
+
 /**
  * 时间回溯：调用 SDK 底层能力
  */
 const handleRewind = (ts: number) => {
   if (!props.runtime) return;
 
-  // 🌟 核心改进 1：回溯时立即清除所有视觉锁定，确保 UI 瞬间刷新
+  // 回溯时立即清除所有视觉锁定，确保 UI 瞬间刷新
   if (switchTimer) {
     clearTimeout(switchTimer);
     switchTimer = null;
@@ -77,14 +90,23 @@ onMounted(() => {
   if (!runtime) return;
 
   devtools.connect(runtime, () => {
-    // 1. 时间轴永远实时刷新，不管有没有锁定
+    // 1. 时间轴永远实时刷新，不受动画护盾影响
     events.value = [...devtools.getEvents()].reverse();
 
-    // 2. 获取当前引擎的真实状态（真理）
     const next = devtools.getActiveDiagnostics();
-    if (devtools.isRewinding(runtime)) {
+    const trace = (runtime as any).engine.trace.all();
+    const isRewinding = trace.length > 0 && trace[trace.length - 1].type === 'REVERT';
+
+    // 2. 时空回溯拥有最高优先级，瞬间打破护盾
+    if (isRewinding) {
       if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
       activeDiagnostics.value = devtools.getActiveDiagnostics();
+      return;
+    }
+
+    // 3. 🛡️ 核心防御：无敌护盾机制
+    // 只要 800ms 的“通关变绿动画”正在播放中，无视外界任何信号干扰，坚决不重置定时器！
+    if (switchTimer) {
       return;
     }
 
@@ -93,26 +115,23 @@ onMounted(() => {
     const engineActiveId = next[0]?.stepId;
 
     if (currentUIId !== engineActiveId) {
-      // 🌟 状态不一致：说明通关了、跳关了、或者全剧终了
+      // 状态不一致：说明通关了、跳关了、或者全剧终了
       if (currentUIId) {
-        // 如果是从“有步骤”变动，先涂绿当前图表（视觉伪造）
+        // 如果是从“有步骤”变动，先涂绿当前图表（视觉伪造大满足）
         activeDiagnostics.value.forEach(diag => forceMarkPassed(diag.tree));
 
-        // 开启 800ms 锁定，保证你看清绿灯
-        if (switchTimer) clearTimeout(switchTimer);
+        // 开启 800ms 锁定护盾，保证你看清绿灯
         switchTimer = setTimeout(() => {
-          activeDiagnostics.value = next; // 800ms 后强制同步成引擎的最新状态
+          activeDiagnostics.value = devtools.getActiveDiagnostics(); // 800ms 后强制拉取最新真实状态
           switchTimer = null;
         }, 800);
       } else {
-        // 如果是从“没步骤”变成“有步骤”（刚启动），立即同步
+        // 如果是从“没步骤”变成“有步骤”（刚启动），立即同步，不需要动画
         activeDiagnostics.value = next;
       }
     } else {
-      // 🌟 状态一致：只是同一步骤内的信号点亮（比如 focus 变绿了）
-      if (!switchTimer) {
-        activeDiagnostics.value = next;
-      }
+      // 状态一致：只是同一步骤内的内部节点亮起，平滑同步
+      activeDiagnostics.value = next;
     }
   });
 });
@@ -246,6 +265,7 @@ onUnmounted(() => {
 .event-type.step_advance { background: #28a745; color: white; }
 .event-type.revert { background: #dc3545; color: white; }
 .event-type.engine_init { background: #666; color: white; }
+.event-type.fact_applied { background: #8e44ad; color: white; } /* 为新增的事件类型加个紫色 */
 
 .event-key { color: #f39c12; font-weight: bold; }
 .event-step { color: #17a2b8; font-style: italic; }
