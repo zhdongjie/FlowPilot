@@ -4,13 +4,45 @@ import { FlowEngine } from "../core/engine";
 import type { Step, Signal, FlowConfig } from "../types";
 
 export class FlowRuntime {
-    private readonly engine: FlowEngine;
+    // 公开 engine 以便 DevTools 内部深度获取数据，或者你也可以保持 private 提供 getter
+    public readonly engine: FlowEngine;
     private timer: any = null;
     private readonly config: FlowConfig;
+
+    // 🌟 新增：订阅者集合，用于通知 Vue/React 等外部 UI 刷新
+    private readonly subscribers: Set<Function> = new Set();
 
     constructor(options: { steps: Step[], rootStepId: string, config: FlowConfig }) {
         this.engine = new FlowEngine(options.steps, options.rootStepId);
         this.config = options.config;
+        this.engine.onStateChange ??= () => {
+            this.notifySubscribers();
+        };
+    }
+
+    // -------------------------
+    // 📢 状态广播与订阅机制 (大喇叭)
+    // -------------------------
+
+    /**
+     * 提供给外部（如 App.vue 或 DevTools）订阅状态变化的接口
+     * @returns 取消订阅的函数
+     */
+    public subscribe(callback: Function): () => void {
+        this.subscribers.add(callback);
+        // 立即触发一次，保证订阅者拿到初始状态
+        callback();
+
+        return () => {
+            this.subscribers.delete(callback);
+        };
+    }
+
+    /**
+     * 内部方法：通知所有监听者
+     */
+    private notifySubscribers() {
+        this.subscribers.forEach(cb => cb());
     }
 
     // -------------------------
@@ -49,7 +81,6 @@ export class FlowRuntime {
 
         // 递归调度下一个最近的任务
         this.scheduleNext();
-
         this.saveProgress();
     }
 
@@ -80,26 +111,33 @@ export class FlowRuntime {
             }
         }
 
-        // 2. 常规启动
+        // 常规启动
         this.engine.tick(Date.now());
         this.scheduleNext();
+
+        // 🌟 启动后通知 UI 刷新
+        this.notifySubscribers();
     }
 
     stop() {
         if (this.timer) clearTimeout(this.timer);
         this.timer = null;
+        // 如果引擎支持 stop，最好也调一下 this.engine.stop()
     }
 
     dispatch(signal: Signal) {
         this.engine.ingest(signal);
         this.scheduleNext();
         this.saveProgress();
+
+        // 🌟 信号打入后，即便没有触发步骤切关，时间轴也多了条数据，必须通知 UI 更新！
+        this.notifySubscribers();
     }
 
     revert(stepId: string) {
         this.engine.revert(stepId);
-        // 回溯后时间轴变了，重新排期
         this.scheduleNext();
+        this.notifySubscribers(); // 🌟 通知更新
     }
 
     get activeSteps(): string[] {
@@ -138,6 +176,6 @@ export class FlowRuntime {
     public revertToTime(targetTs: number) {
         this.engine.revertToTime(targetTs);
         this.scheduleNext(); // 回放后时间轴变了，重新排期定时器
+        this.notifySubscribers(); // 🌟 通知更新
     }
-
 }

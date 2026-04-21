@@ -73,57 +73,48 @@ const handleRewind = (ts: number) => {
 };
 
 onMounted(() => {
-  if (props.runtime) {
-    devtools.connect(props.runtime, () => {
-      events.value = [...devtools.getEvents()].reverse();
+  const runtime = props.runtime;
+  if (!runtime) return;
 
-      const next = devtools.getActiveDiagnostics();
-      const prev = activeDiagnostics.value;
-      const currentId = prev[0]?.stepId;
-      const nextId = next[0]?.stepId;
+  devtools.connect(runtime, () => {
+    // 1. 时间轴永远实时刷新，不管有没有锁定
+    events.value = [...devtools.getEvents()].reverse();
 
-      const runtime = props.runtime;
-      if (!runtime) return;
+    // 2. 获取当前引擎的真实状态（真理）
+    const next = devtools.getActiveDiagnostics();
+    if (devtools.isRewinding(runtime)) {
+      if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
+      activeDiagnostics.value = devtools.getActiveDiagnostics();
+      return;
+    }
 
-      const allEvents = devtools.getEvents();
-      events.value = [...allEvents].reverse();
+    // 4. 判定 UI 是否需要“变动”
+    const currentUIId = activeDiagnostics.value[0]?.stepId;
+    const engineActiveId = next[0]?.stepId;
 
-      const trace = runtime.engine.trace.all();
-      const isRewinding = trace.length > 0 && trace[trace.length - 1].type === 'REVERT';
+    if (currentUIId !== engineActiveId) {
+      // 🌟 状态不一致：说明通关了、跳关了、或者全剧终了
+      if (currentUIId) {
+        // 如果是从“有步骤”变动，先涂绿当前图表（视觉伪造）
+        activeDiagnostics.value.forEach(diag => forceMarkPassed(diag.tree));
 
-      if (isRewinding) {
-        // 如果是回溯，立即杀掉计时器，强行同步 UI
-        if (switchTimer) {
-          clearTimeout(switchTimer);
-          switchTimer = null;
-        }
-        activeDiagnostics.value = next;
-        return; // 结束，不走后面的 800ms 锁定逻辑
-      }
-
-      // 🌟 核心改进 2：区分是“前进”还是“后退”
-      // 我们通过判断 nextId 是否在已完成列表里，或者简单的“步骤切换”逻辑
-
-      const isSteppingForward = currentId && nextId && currentId !== nextId;
-      const isFinishing = currentId && !nextId;
-
-      if (isSteppingForward || isFinishing) {
-        // 只有【正常通关】才需要 800ms 视觉锁定
-        prev.forEach(diag => forceMarkPassed(diag.tree));
-
+        // 开启 800ms 锁定，保证你看清绿灯
         if (switchTimer) clearTimeout(switchTimer);
         switchTimer = setTimeout(() => {
-          activeDiagnostics.value = next;
+          activeDiagnostics.value = next; // 800ms 后强制同步成引擎的最新状态
           switchTimer = null;
         }, 800);
       } else {
-        // 如果是【回溯】或【同步骤更新】，直接渲染，不加延迟
-        if (!switchTimer) {
-          activeDiagnostics.value = next;
-        }
+        // 如果是从“没步骤”变成“有步骤”（刚启动），立即同步
+        activeDiagnostics.value = next;
       }
-    });
-  }
+    } else {
+      // 🌟 状态一致：只是同一步骤内的信号点亮（比如 focus 变绿了）
+      if (!switchTimer) {
+        activeDiagnostics.value = next;
+      }
+    }
+  });
 });
 
 /**

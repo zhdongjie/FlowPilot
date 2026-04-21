@@ -59,4 +59,11 @@ export class FlowDevTools {
 
         this.onUpdateCallback?.();
     }
+
+    public isRewinding(runtime: FlowRuntime): boolean {
+        // 在内部访问私有属性是允许的
+        const trace = (runtime as any).engine.trace.all();
+        return trace.length > 0 && trace[trace.length - 1].type === 'REVERT';
+    }
+
 }

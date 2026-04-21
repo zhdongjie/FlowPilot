@@ -14,7 +14,7 @@ import type {
 } from "../types";
 import { FlowParser } from "../compiler/parser";
 import { ConditionCompiler } from "../compiler/condition";
-import { TimerScheduler } from "../runtime/scheduler.ts";
+import { TimerScheduler } from "../runtime/scheduler";
 
 export interface IndexedEvent {
     ts: number;
@@ -44,6 +44,9 @@ export class FlowEngine {
 
     private readonly evalCtx: EvalContext;
     private readonly scheduler = new TimerScheduler();
+
+    private heartbeatTimer: any = null;
+    public onStateChange?: () => void; // 📢 外部 UI 监听大喇叭
 
     constructor(steps: Step[], rootStepId: string) {
         steps.forEach(rawStep => {
@@ -83,6 +86,7 @@ export class FlowEngine {
         };
 
         this.resetState();
+        this.startHeartbeat();
     }
 
     /**
@@ -265,7 +269,6 @@ export class FlowEngine {
 
     /**
      * 主动时间滴答：驱动引擎检查那些“没有新事件，但时间已经流逝”的条件
-     * 比如: cancelWhen: !pay within(5000)
      */
     public tick(now: number = Date.now()) {
         // 赋予引擎当前最新的绝对时间，强制它进行一次全盘扫描
@@ -316,34 +319,60 @@ export class FlowEngine {
     }
 
     // -------------------------
-    // CORE LOOP (安全性 + 拓扑推进)
+    // CORE LOOP (极简纯粹逻辑推演)
     // -------------------------
-    // -------------------------
-    // CORE LOOP (V2 工业级重构版)
-    // -------------------------
+    // ✅ 修改后的 evaluateLoop：逻辑闭环，精准广播
     private evaluateLoop(currentEventTs: number) {
+        this.startHeartbeat();
+
         let changed = true;
         let guard = 0;
         const MAX_LOOP = 1000;
+        let didStateChange = false; // 记录本次是否有状态跃迁
 
         while (changed) {
             if (++guard > MAX_LOOP) {
-                throw new Error("[FlowPilot Engine] Critical: Infinite loop detected during evaluation.");
+                throw new Error("[FlowPilot Engine] Critical: Infinite loop detected.");
             }
 
-            // 使用短路或 (||) 汇聚阶段变更
-            // 注意：必须依次执行完，只要有任何一个阶段发生了变更，就继续下一轮循环
             const pendingChanged = this.processPendingSteps(currentEventTs);
             const activeChanged = this.processActiveSteps(currentEventTs);
 
             changed = pendingChanged || activeChanged;
+
+            if (changed) didStateChange = true;
+        }
+
+        // 🌟 核心收尾逻辑：如果所有的 step 都执行完了
+        if (this.activeSteps.size === 0 && this.pendingSteps.size === 0) {
+            // 1. 记录“流程结束”的专属事实
+            this.trace.record({
+                type: "FACT_APPLIED" as any, // 或者你定义一个 "FLOW_COMPLETED"
+                timestamp: currentEventTs,
+                key: "flow_completed",
+                meta: { message: "All steps finished naturally." }
+            });
+
+            // 2. 触发一次终极状态更新广播
+            if (this.onStateChange) {
+                this.onStateChange();
+            }
+
+            // 3. 停止心跳，功成身退
+            this.stop();
+            return; // 提前退出，不再走下面的常规广播
+        }
+
+        // 💡 常规广播（针对没走完流程时的状态跃迁）
+        if (didStateChange && this.onStateChange) {
+            this.onStateChange();
         }
     }
 
     // 🟢 阶段 1：处理 Pending -> Active 的跃迁
     private processPendingSteps(currentEventTs: number): boolean {
         let changed = false;
-        for (const stepId of [...this.pendingSteps]) {
+        for (const stepId of this.pendingSteps) {
             const step = this.stepsMap.get(stepId);
             if (!step) continue;
 
@@ -383,7 +412,7 @@ export class FlowEngine {
     private tryCancelStep(step: ParsedStep, stepId: string, currentEventTs: number): boolean {
         const ctx = this.buildContext(stepId, currentEventTs);
         // 👉 O(1) 闭包调用！
-        if (!step.compiledCancelWhen || !step.compiledCancelWhen(ctx)) {
+        if (!step.compiledCancelWhen?.(ctx)) {
             return false;
         }
 
@@ -401,13 +430,14 @@ export class FlowEngine {
     }
 
     // ✅ 完成判定
+    // ✅ 修改后的 tryCompleteStep：同步执行，干净利落
     private tryCompleteStep(step: ParsedStep, stepId: string, currentEventTs: number): boolean {
         const ctx = this.buildContext(stepId, currentEventTs);
         if (!step.compiledWhen?.(ctx)) {
             return false;
         }
 
-        // 🌟 1. 记录日志（此时 DAG 还能拿到 passed: true 的状态）
+        // 记录日志
         this.trace.record({
             type: "STEP_ADVANCE",
             timestamp: currentEventTs,
@@ -416,14 +446,14 @@ export class FlowEngine {
             meta: { conditionType: step.when.type }
         });
 
+        // 🌟 1. 同步变更状态
         this.completedSteps.add(stepId);
         this.activeSteps.delete(stepId);
         this.completedAt.set(stepId, currentEventTs);
 
-        setTimeout(() => {
-            this.activateNextSteps(step.next);
-            this.evaluateLoop(Date.now());
-        }, 100);
+        // 🌟 2. 立即激活下一步（不再需要 setTimeout！）
+        this.activateNextSteps(step.next);
+
         return true;
     }
 
@@ -717,4 +747,29 @@ export class FlowEngine {
         return this.trace;
     }
 
+    // -------------------------
+    // ENGINE HEARTBEAT
+    // -------------------------
+
+    private startHeartbeat() {
+        if (this.heartbeatTimer) return;
+
+        this.heartbeatTimer = setInterval(() => {
+            // 1. 拨动内部时间齿轮，检查 timer 是否到期
+            this.evaluateLoop(Date.now());
+
+            // 🌟 2. 终极暴力大喇叭：只要引擎还在工作，每半秒强刷一次 UI
+            if (this.onStateChange) {
+                this.onStateChange();
+            }
+        }, 500);
+    }
+
+    // 保持 public，允许业务层在“强行退出页面”时手动销毁
+    public stop() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+    }
 }
