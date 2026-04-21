@@ -85,55 +85,55 @@ const handleRewind = (ts: number) => {
   devtools.rewindTime(props.runtime, ts);
 };
 
+let devtoolsUnsub: any = null;
+
 onMounted(() => {
   const runtime = props.runtime;
   if (!runtime) return;
 
-  devtools.connect(runtime, () => {
-    // 1. 时间轴永远实时刷新，不受动画护盾影响
+  // 1. 链接 runtime
+  devtools.connect(runtime);
+
+  // 2. 订阅 devtools 的广播
+  devtoolsUnsub = devtools.emitter.subscribe(() => {
+    // 只要听到广播，无脑执行 Pull (主动拉取数据)
     events.value = [...devtools.getEvents()].reverse();
-
     const next = devtools.getActiveDiagnostics();
-    const trace = (runtime as any).engine.trace.all();
-    const isRewinding = trace.length > 0 && trace[trace.length - 1].type === 'REVERT';
 
-    // 2. 时空回溯拥有最高优先级，瞬间打破护盾
-    if (isRewinding) {
+    // 回溯特判，打破护盾
+    if (devtools.isRewinding(runtime)) {
       if (switchTimer) { clearTimeout(switchTimer); switchTimer = null; }
       activeDiagnostics.value = devtools.getActiveDiagnostics();
       return;
     }
 
-    // 3. 🛡️ 核心防御：无敌护盾机制
-    // 只要 800ms 的“通关变绿动画”正在播放中，无视外界任何信号干扰，坚决不重置定时器！
-    if (switchTimer) {
-      return;
-    }
+    // 动画护盾
+    if (switchTimer) return;
 
-    // 4. 判定 UI 是否需要“变动”
+    // UI 判定逻辑 (不变)
     const currentUIId = activeDiagnostics.value[0]?.stepId;
     const engineActiveId = next[0]?.stepId;
 
     if (currentUIId !== engineActiveId) {
-      // 状态不一致：说明通关了、跳关了、或者全剧终了
       if (currentUIId) {
-        // 如果是从“有步骤”变动，先涂绿当前图表（视觉伪造大满足）
         activeDiagnostics.value.forEach(diag => forceMarkPassed(diag.tree));
-
-        // 开启 800ms 锁定护盾，保证你看清绿灯
         switchTimer = setTimeout(() => {
-          activeDiagnostics.value = devtools.getActiveDiagnostics(); // 800ms 后强制拉取最新真实状态
+          activeDiagnostics.value = devtools.getActiveDiagnostics();
           switchTimer = null;
         }, 800);
       } else {
-        // 如果是从“没步骤”变成“有步骤”（刚启动），立即同步，不需要动画
         activeDiagnostics.value = next;
       }
     } else {
-      // 状态一致：只是同一步骤内的内部节点亮起，平滑同步
       activeDiagnostics.value = next;
     }
   });
+});
+
+onUnmounted(() => {
+  devtoolsUnsub?.(); // 清理订阅
+  devtools.disconnect();
+  if (switchTimer) clearTimeout(switchTimer);
 });
 
 /**

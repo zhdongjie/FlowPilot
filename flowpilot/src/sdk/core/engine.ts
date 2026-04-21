@@ -747,6 +747,20 @@ export class FlowEngine {
         return this.trace;
     }
 
+    /** 👉 暴露当前引擎实例的原始配置 (供影子引擎克隆) */
+    public getConfigSnap() {
+        return {
+            // 你之前传入 constructor 的步骤
+            steps: Array.from(this.stepsMap.values()),
+            rootStepId: this.rootStepId
+        };
+    }
+
+    /** 👉 暴露所有历史打入的原始信号 (供影子引擎重构案发现场) */
+    public getSignals(): Signal[] {
+        return this.store.getEvents();
+    }
+
     // -------------------------
     // ENGINE HEARTBEAT
     // -------------------------
