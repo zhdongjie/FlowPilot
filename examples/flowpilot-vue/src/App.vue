@@ -1,118 +1,67 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, inject } from 'vue'
 import axios from 'axios'
 
-// 🌟 引入刚写好的观测组件
-import DevToolsPanel from './DevToolsPanel.vue'
+// 🌟 从 Vue 注入拿 runtime（干净！）
+const runtime = inject<any>('flowRuntime', null)
 
-// --- [业务响应式状态] ---
+// --- 业务状态 ---
 const isLoggedIn = ref(false)
 const showForm = ref(false)
+
 const formData = ref({
   userName: '',
   idCard: ''
 })
 
-// --- [SDK 观测状态] ---
-const runtime = ref<any>(null)
-
-onMounted(() => {
-  // 🌟 从 window 拿到全局导引实例（由 main.ts 挂载）
-  // 稍微延迟 100ms 确保 SDK 初始化完成
-  setTimeout(() => {
-    if ((window as any).__FLOW_GUIDE__) {
-      runtime.value = (window as any).__FLOW_GUIDE__.runtime
-      console.log("🛠️ [App] 已成功连接 FlowPilot 运行时")
-    }
-  }, 100)
-})
-
-/**
- * 登录逻辑
- * 成功后由 AxiosAdapter 发出 'login_success' 信号
- */
+// ---------------- 登录 ----------------
 const handleLogin = async () => {
-  try {
-    const res = await axios.post('/api/login')
-    if (res.data.code === 'login_success') {
-      isLoggedIn.value = true
-    }
-  } catch (e) {
-    console.error("登录失败", e)
+  const res = await axios.post('/api/login')
+  if (res.data.code === 'login_success') {
+    isLoggedIn.value = true
   }
 }
 
-/**
- * 提交表单
- * 成功后由 AxiosAdapter 发出 'submit_success' 信号
- */
+// ---------------- 提交 ----------------
 const handleSubmit = async () => {
-  try {
-    const res = await axios.post('/api/submit', formData.value)
-    if (res.data.code === 'submit_success') {
-      showForm.value = false
-    }
-  } catch (e) {
-    console.error("提交失败", e)
+  const res = await axios.post('/api/submit', formData.value)
+  if (res.data.code === 'submit_success') {
+    showForm.value = false
   }
 }
 
-// ==========================================
-// 🚀 新增：业务与引导的互动逻辑
-// ==========================================
-
-/**
- * 🌟 局部返回逻辑：业务退回工作台，引导时光倒流
- */
+// ---------------- 返回（🌟 只调 SDK API） ----------------
 const handleGoBack = () => {
-  // 1. 业务层面：隐藏表单，退回工作台
-  showForm.value = false;
+  showForm.value = false
 
-  // 2. 引导层面：呼叫 SDK 回溯
-  const runtime = (window as any).__FLOW_GUIDE__;
-
-  if (runtime && runtime.engine) {
-    const targetStepId = 'step_open_account';
-
-    // 🌟 核心逻辑：从 Trace 记录中找到该步骤激活的那个瞬间
-    const traceLogs = runtime.engine.getTrace().all();
-    const activateEvent = traceLogs.find(
-        (e: any) => e.type === 'STEP_ACTIVATE' && e.stepId === targetStepId
-    );
-
-    if (activateEvent) {
-      console.log(`[App] ⏪ 正在回溯至步骤 ${targetStepId}，时间点: ${activateEvent.timestamp}`);
-
-      // ✅ 使用正确的方法名：revertToTime
-      runtime.engine.revertToTime(activateEvent.timestamp);
-    } else {
-      // 如果没找到记录（比如还没走到那一步），则尝试重置到初始状态
-      console.warn(`[App] 未找到步骤 ${targetStepId} 的激活记录，执行重置`);
-      runtime.engine.revertToTime(0);
-    }
-  }
+  // ❌ 不再操作 trace / engine
+  runtime?.revertToStep?.('step_open_account')
 }
 
-/**
- * 🌟 全局重置逻辑：一键清空持久化缓存，重头再来
- */
+// ---------------- 重置（🌟 正确做法） ----------------
 const handleResetAll = () => {
-  // 清除在 main.ts 中配置的 persistence key 及其通关印章
-  localStorage.removeItem('flowpilot_onboarding_v1');
-  localStorage.removeItem('flowpilot_onboarding_v1_finished');
+  // 1️⃣ 重置 SDK
+  runtime?.reset?.()
 
-  // 直接刷新页面
-  window.location.reload();
+  // 2️⃣ 重置业务 UI
+  isLoggedIn.value = false
+  showForm.value = false
+  formData.value = {
+    userName: '',
+    idCard: ''
+  }
 }
 </script>
-
 <template>
   <div class="container">
     <div class="header-actions">
       <h2>FlowPilot 工业级引导演练场</h2>
-      <button class="btn-reset" @click="handleResetAll">🔄 重置缓存并重来</button>
+      <button class="btn-reset" @click="handleResetAll">
+        🔄 重置缓存并重来
+      </button>
     </div>
 
+    <!-- 登录态 -->
     <div v-if="!isLoggedIn" class="card login-box">
       <h3>系统登录</h3>
       <p>请点击登录按钮开始您的开户旅程</p>
@@ -126,6 +75,7 @@ const handleResetAll = () => {
       </button>
     </div>
 
+    <!-- 主界面 -->
     <div v-else class="main-content">
       <header class="dashboard-header">
         <span class="user-info">欢迎，管理员</span>
@@ -139,8 +89,11 @@ const handleResetAll = () => {
         </button>
       </header>
 
+      <!-- 表单 -->
       <div v-if="showForm" id="account-form" class="card form-container">
-        <button class="btn-back" @click="handleGoBack">⬅ 返回工作台</button>
+        <button class="btn-back" @click="handleGoBack">
+          ⬅ 返回工作台
+        </button>
 
         <h3>开户申请表</h3>
         <p class="form-desc">请填写以下信息以完成实名认证</p>
@@ -179,17 +132,15 @@ const handleResetAll = () => {
         </div>
       </div>
 
+      <!-- 成功态 -->
       <div v-if="isLoggedIn && !showForm" class="success-placeholder">
         <p>感谢您的提交，审核结果将通过短信通知。</p>
       </div>
     </div>
-
-    <DevToolsPanel v-if="runtime" :runtime="runtime" />
   </div>
 </template>
 
 <style scoped>
-/* 原有 container 样式保持不变 */
 .container {
   max-width: 800px;
   margin: 50px 400px 50px auto;
@@ -197,9 +148,6 @@ const handleResetAll = () => {
   transition: all 0.3s ease;
 }
 
-/* ============================
-   🌟 新增按钮相关样式
-============================ */
 .header-actions {
   display: flex;
   justify-content: space-between;
@@ -216,7 +164,6 @@ const handleResetAll = () => {
   border-radius: 6px;
   cursor: pointer;
   font-size: 14px;
-  transition: opacity 0.2s;
 }
 .btn-reset:hover { opacity: 0.8; }
 
@@ -231,18 +178,77 @@ const handleResetAll = () => {
 }
 .btn-back:hover { text-decoration: underline; }
 
-/* ============================
-   原有样式保持不变
-============================ */
 .login-box { text-align: center; max-width: 400px; margin: 0 auto; }
-.dashboard-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 25px; background: #f8f9fa; border-radius: 8px; margin-bottom: 30px; }
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 25px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 30px;
+}
+
 .form-container { margin-top: 20px; }
+
 .form-group { margin-bottom: 20px; }
-.form-group label { display: block; margin-bottom: 8px; font-weight: 500; }
-.form-input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-.form-input:focus { border-color: #007aff; outline: none; box-shadow: 0 0 0 3px rgba(0,122,255,0.1); }
-.btn-primary { background: #007aff; color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; width: 100%; font-size: 16px; }
-.btn-secondary { background: #34c759; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
-.btn-submit { background: #1a1a1a; color: white; border: none; padding: 14px; border-radius: 6px; cursor: pointer; width: 100%; font-size: 16px; font-weight: 600; }
-.success-placeholder { text-align: center; margin-top: 50px; color: #666; }
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.form-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  border-color: #007aff;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0,122,255,0.1);
+}
+
+.btn-primary {
+  background: #007aff;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: 100%;
+  font-size: 16px;
+}
+
+.btn-secondary {
+  background: #34c759;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-submit {
+  background: #1a1a1a;
+  color: white;
+  border: none;
+  padding: 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: 100%;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.success-placeholder {
+  text-align: center;
+  margin-top: 50px;
+  color: #666;
+}
 </style>

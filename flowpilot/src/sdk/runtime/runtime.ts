@@ -5,34 +5,39 @@ import type { FlowConfig, Signal, Step } from "../types";
 import { EventEmitter } from "../utils/emitter";
 
 export class FlowRuntime {
-    public readonly engine: FlowEngine;
+    public engine: FlowEngine;
+
     private timer: any = null;
     private readonly config: FlowConfig;
 
-    // 🌟 纯正的事件分发器 (替代了旧的 Set<Function>)
+    // 🌟 状态广播器（唯一数据出口）
     private readonly stateEmitter = new EventEmitter<void>();
 
-    constructor(options: { steps: Step[], rootStepId: string, config: FlowConfig }) {
+    constructor(options: {
+        steps: Step[],
+        rootStepId: string,
+        config: FlowConfig
+    }) {
         this.engine = new FlowEngine(options.steps, options.rootStepId);
         this.config = options.config;
 
-        // 引擎内部发生流转时，触发广播
+        // 🌟 引擎状态变化 → Runtime 广播
         this.engine.onStateChange ??= () => {
             this.stateEmitter.emit();
         };
     }
 
-    // -------------------------
-    // 📢 状态广播与订阅机制
-    // -------------------------
+    // =========================
+    // 📢 订阅机制（唯一 UI 入口）
+    // =========================
 
     public subscribe(callback: () => void): () => void {
         return this.stateEmitter.subscribe(callback);
     }
 
-    // -------------------------
-    // ⏰ 精准调度器逻辑
-    // -------------------------
+    // =========================
+    // ⏰ 调度器
+    // =========================
 
     private scheduleNext() {
         if (this.timer) clearTimeout(this.timer);
@@ -65,25 +70,31 @@ export class FlowRuntime {
         this.saveProgress();
     }
 
-    // -------------------------
-    // 🚀 接口对接
-    // -------------------------
+    // =========================
+    // 🚀 生命周期
+    // =========================
 
-    start() {
+    public start() {
         const { persistence } = this.config.runtime;
+
+        // 🌟 恢复历史进度
         if (persistence.enabled) {
             const saved = localStorage.getItem(persistence.key);
+
             if (saved) {
                 try {
                     const completedIds: string[] = JSON.parse(saved);
+
                     completedIds.forEach(id => {
                         this.engine.forceComplete(id);
                     });
 
                     if (this.config.debug) {
-                        console.log(`[FlowPilot] 💾 已跳过历史步骤: ${completedIds.join(', ')}`);
+                        console.log(
+                            `[FlowPilot] 💾 恢复进度: ${completedIds.join(", ")}`
+                        );
                     }
-                } catch (e) {
+                } catch {
                     localStorage.removeItem(persistence.key);
                 }
             }
@@ -91,58 +102,132 @@ export class FlowRuntime {
 
         this.engine.tick(Date.now());
         this.scheduleNext();
-        this.stateEmitter.emit(); // 🌟 启动后广播
+
+        // 🌟 首次广播
+        this.stateEmitter.emit();
     }
 
-    stop() {
+    public stop() {
         if (this.timer) clearTimeout(this.timer);
         this.timer = null;
+
         this.engine.stop();
     }
 
-    dispatch(signal: Signal) {
+    // =========================
+    // 📡 信号入口（唯一入口）
+    // =========================
+
+    public dispatch(signal: Signal) {
         this.engine.ingest(signal);
+
         this.scheduleNext();
         this.saveProgress();
-        this.stateEmitter.emit(); // 🌟 强行广播（保证 Timeline 记录纯信号事件）
+
+        // 🌟 强制广播（保证 timeline 更新）
+        this.stateEmitter.emit();
     }
 
-    revert(stepId: string) {
+    // =========================
+    // ⏪ 回溯能力（核心）
+    // =========================
+
+    public revert(stepId: string) {
         this.engine.revert(stepId);
+
         this.scheduleNext();
-        this.stateEmitter.emit(); // 🌟 回溯后广播
+        this.stateEmitter.emit();
     }
 
-    revertToTime(targetTs: number) {
+    public revertToTime(targetTs: number) {
         this.engine.revertToTime(targetTs);
+
         this.scheduleNext();
-        this.stateEmitter.emit(); // 🌟 回溯后广播
+        this.stateEmitter.emit();
     }
 
-    get activeSteps(): string[] {
-        return this.engine.getActiveSteps();
-    }
+    /**
+     * 🌟 推荐给业务层使用（抽象更高）
+     */
+    public revertToStep(stepId: string) {
+        const traceLogs = this.engine.getTraceStore().all();
 
-    get completedSteps(): string[] {
-        return this.engine.getCompletedSteps();
-    }
+        const activateEvent = traceLogs.find(
+            (e: any) =>
+                e.type === "STEP_ACTIVATE" &&
+                e.stepId === stepId
+        );
 
-    public debug() {
-        return this.engine.inspect();
-    }
-
-    private saveProgress() {
-        if (this.config.runtime.persistence.enabled) {
-            localStorage.setItem(
-                this.config.runtime.persistence.key,
-                JSON.stringify(this.engine.getCompletedSteps())
+        if (activateEvent) {
+            this.revertToTime(activateEvent.timestamp);
+        } else {
+            console.warn(
+                `[FlowPilot] 未找到步骤 '${stepId}'，回退至起点`
             );
+            this.revertToTime(0);
         }
     }
 
-    // -------------------------
-    // 🔍 提供给外部 Pull (拉取) 的只读接口
-    // -------------------------
+    // =========================
+    // 💾 持久化
+    // =========================
+
+    private saveProgress() {
+        const { persistence } = this.config.runtime;
+
+        if (!persistence.enabled) return;
+
+        localStorage.setItem(
+            persistence.key,
+            JSON.stringify(this.engine.getCompletedSteps())
+        );
+    }
+
+    /**
+     * 🌟 业务 API：清缓存（不再让业务碰 localStorage）
+     */
+    public clearCache() {
+        const { persistence } = this.config.runtime;
+
+        if (!persistence.enabled) return;
+
+        const key = persistence.key;
+
+        localStorage.removeItem(key);
+        localStorage.removeItem(`${key}_finished`);
+    }
+
+    /**
+     * 🌟 可选增强：清缓存 + 重启（推荐你加）
+     */
+    public reset() {
+        // 1. 清缓存
+        this.clearCache();
+
+        // 2. 停止当前调度器
+        this.stop();
+
+        // 3. 🌟 关键：重建 engine（彻底干净）
+        const { steps, rootStepId } = this.engine.getConfigSnap();
+
+        this.engine.stop(); // 确保心跳关掉
+
+        // ⚠️ 直接 new 一个全新的 engine（最干净）
+        this.engine = new FlowEngine(steps, rootStepId);
+
+        // 重新绑定事件
+        this.engine.onStateChange = () => {
+            this.stateEmitter.emit();
+        };
+
+        // 4. 重新启动
+        this.start();
+    }
+
+    // =========================
+    // 🔍 只读数据接口（DevTools 用）
+    // =========================
+
     public getTraceStream() {
         return this.engine.getTraceStore();
     }
@@ -157,5 +242,21 @@ export class FlowRuntime {
 
     public getConfig() {
         return this.config;
+    }
+
+    // =========================
+    // 📊 状态快照
+    // =========================
+
+    get activeSteps(): string[] {
+        return this.engine.getActiveSteps();
+    }
+
+    get completedSteps(): string[] {
+        return this.engine.getCompletedSteps();
+    }
+
+    public debug() {
+        return this.engine.inspect();
     }
 }

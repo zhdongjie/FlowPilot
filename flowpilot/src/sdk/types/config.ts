@@ -61,7 +61,7 @@ export const DEFAULT_CONFIG: FlowConfig = {
     },
     runtime: {
         pollingInterval: 50,
-        autoStart: true,
+        autoStart: false,
         persistence: {
             enabled: true,
             key: "flowpilot_finished"
