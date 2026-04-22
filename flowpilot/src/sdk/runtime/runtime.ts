@@ -20,15 +20,18 @@ export class FlowRuntime {
         this.engine = new FlowEngine(options.steps, options.rootStepId);
         this.config = options.config;
 
-        // 1. 注册插件
-        if (options.plugins) {
+        // 1.初始化插件上下文
+        this.initPluginContext();
+
+        // 2.注册插件
+        if (options.plugins?.length) {
             this.pluginManager.register(options.plugins);
         }
 
-        // 2. 初始化插件上下文 (沙箱化控制权)
-        this.initPluginContext();
+        // 3.初始化插件
+        this.pluginManager.setup(this.pluginManager["ctx"]);
 
-        // 3. 监听引擎状态变化，转换为插件周期的 Hook
+        // 4.监听引擎状态变化
         this.engine.onStateChange ??= () => {
             this.stateEmitter.emit();
             this.pluginManager.emitHook("onRender");

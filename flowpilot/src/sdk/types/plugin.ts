@@ -65,3 +65,13 @@ export interface FlowPlugin {
     // ==========================================
     onRender?(ctx: FlowPluginContext): void;
 }
+
+export interface AxiosPluginOptions {
+    instance: any;
+
+    extractor?: (res: any) => string | null | undefined;
+    
+    name?: string;
+    enableErrorHook?: boolean;
+    timeout?: number;
+}

@@ -16,14 +16,10 @@ export type { FlowPlugin, FlowPluginContext } from './types/plugin';
 export { DevToolsPlugin } from './devtools/plugin';
 export { LoggerPlugin } from './plugins/logger';
 export { AxiosPlugin } from './plugins/axios';
+export { DOMPlugin } from "./plugins/dom";
 
 // ==========================================
-// 3. 采集器 (Collectors)
-// ==========================================
-export { BehaviorCollector } from "./collector/collector";
-
-// ==========================================
-// 4. 类型定义 (Types)
+// 3. 类型定义 (Types)
 // ==========================================
 export type {
     GuideStep,
@@ -31,10 +27,11 @@ export type {
     Step,
     Condition,
     Signal
-} from './types';
+} from './types'
+export { PluginPresets } from './plugins/presets.ts'
 
 // ==========================================
-// 5. 工厂函数
+// 4. 工厂函数
 // ==========================================
 /**
  * FlowPilot 工业级入口点

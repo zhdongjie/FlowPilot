@@ -1,14 +1,12 @@
 // src/sdk/guide/controller.ts
 import { FlowRuntime } from "../runtime/runtime";
-import { BehaviorCollector } from "../collector/collector";
 import { GuideOrchestrator } from "./orchestrator";
 import type { FlowPlugin, GuideStep } from "../types";
 import { FlowParser } from "../compiler/parser";
 import { FlowConfig, DEFAULT_CONFIG } from "../types";
 
 export class GuideController {
-    public readonly runtime: FlowRuntime;
-    public readonly collector: BehaviorCollector;
+    public readonly runtime: FlowRuntime
     private readonly orchestrator: GuideOrchestrator;
     public readonly config: FlowConfig;
 
@@ -18,7 +16,6 @@ export class GuideController {
         config?: Partial<FlowConfig>;
         plugins?: FlowPlugin[];
     }) {
-        // 1. 深度合并配置 (用传入的覆盖默认的)
         this.config = {
             ...DEFAULT_CONFIG,
             ...options.config,
@@ -26,11 +23,8 @@ export class GuideController {
             runtime: { ...DEFAULT_CONFIG.runtime, ...options.config?.runtime }
         };
 
-        // 2. 预处理 Steps (AST 编译)
-
         const compiledSteps = this.compileSteps(options.steps);
 
-        // 3. 初始化内核
         this.runtime = new FlowRuntime({
             steps: compiledSteps,
             rootStepId: options.rootStepId,
@@ -38,13 +32,9 @@ export class GuideController {
             plugins: options.plugins
         });
 
-        // 4. 初始化采集层 (从 config 中提取适配器)
-        this.collector = new BehaviorCollector(this.runtime, this.config);
 
-        // 5. 初始化编排层 (传入配置供 UI 使用)
         this.orchestrator = new GuideOrchestrator(this.runtime, compiledSteps, this.config);
 
-        // 6. 绑定内置信号 (下一步按钮)
         this.bindInternalSignals();
     }
 
@@ -88,7 +78,6 @@ export class GuideController {
         this.runtime.start();
 
         // 2. 正常启动流程
-        this.collector.mount();
         this.orchestrator.start();
 
         // 3. 发射初始脉冲
