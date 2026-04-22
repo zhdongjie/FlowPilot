@@ -18,7 +18,9 @@ export type TraceEventType =
     | "EVENT_MATCH"
     | "REVERT"
     | "RECOMPUTE_START"
-    | "RECOMPUTE_END";
+    | "RECOMPUTE_END"
+    | "STEP_COMPLETE"
+    ;
 
 export interface TraceEvent {
     type: TraceEventType;

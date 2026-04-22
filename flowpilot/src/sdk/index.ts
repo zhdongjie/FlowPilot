@@ -1,51 +1,36 @@
 // flowpilot/src/sdk/index.ts
 
-// ---------------- Core ----------------
-export { FlowEngine } from './core/engine';
-export { FlowParser } from './compiler/parser';
-export { GuideController } from "./guide/controller";
-export { FlowRuntime } from './runtime/runtime';
+import { GuideController } from './guide/controller';
+import type { GuideStep, FlowConfig } from './types';
 
-// ---------------- Types ----------------
-export type { GuideStep } from "./types/guide";
+// ==========================================
+// 1. 核心导出
+// ==========================================
+export { GuideController } from './guide/controller';
+export { FlowRuntime } from './runtime/runtime';
+export { FlowParser } from './compiler/parser';
+export type { GuideStep } from './types';
+
+// ==========================================
+// 2. 插件与配置
+// ==========================================
+export { AxiosAdapter } from "./collector/adapters";
 export type { NetworkAdapter, EmitFunction } from "./types/collector";
 
-// ---------------- Collector ----------------
-export { AxiosAdapter } from "./collector/adapters";
-
-// ---------------- DevTools Core ----------------
+// ==========================================
+// 3. 开发者观测平台 (DevTools)
+// ==========================================
 export { FlowDevTools } from './devtools/controller';
-export { buildGraph } from "./devtools/dag/builder";
-export { DevToolsPlugin } from './devtools/plugin';
+export { FlowDevToolsPanel } from './devtools/viewer/panel';
 
-// ---------------- DevTools UI（可选导出）----------------
-export { FlowDevToolsPanel } from "./devtools/viewer/panel";
-
-export { createFlowGuide } from "./guide/factory";
-
-
-// ---------------- DSL 工厂 ----------------
-import { FlowEngine } from './core/engine';
-import { FlowParser } from './compiler/parser';
-import type { Condition, Step } from './types';
-
-export interface DslStep extends Omit<Step, 'when'> {
-    when: string | Condition;
-}
-
-/**
- * FlowPilot 工业级入口点
- */
-export function createFlowPilot(steps: DslStep[], rootId: string): FlowEngine {
-    const compiledSteps: Step[] = steps.map(step => {
-        if (typeof step.when === 'string') {
-            return {
-                ...step,
-                when: FlowParser.parse(step.when)
-            };
-        }
-        return step as Step;
-    });
-
-    return new FlowEngine(compiledSteps, rootId);
+// ==========================================
+// 4. 工厂函数 (提供极简接入)
+// ==========================================
+export function createFlowPilot(options: {
+    steps: GuideStep[];
+    rootStepId: string;
+    config?: Partial<FlowConfig>;
+}): GuideController {
+    // 直接返回你写好的、集成了采集、编排、渲染的总控类
+    return new GuideController(options);
 }

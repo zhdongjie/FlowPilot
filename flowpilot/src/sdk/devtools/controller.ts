@@ -83,6 +83,19 @@ export class FlowDevTools {
         })).filter((diag: any) => diag.tree !== null);
     }
 
+    // 允许直接获取任意 step 的诊断树(包括已通关的)
+    getDiagnostic(stepId: string) {
+        if (!this.debugEngine) return null;
+        try {
+            return {
+                stepId,
+                tree: this.debugEngine.explain(stepId)
+            };
+        } catch {
+            return null;
+        }
+    }
+
     isRewinding(runtime: FlowRuntime): boolean {
         // 直接看真实引擎的历史，判断当前是否处于回溯状态
         const trace = runtime.getTraceStream().all();
@@ -100,12 +113,16 @@ export class FlowDevTools {
 
     setHoveredEventKey(key: string | null) {
         this.hoveredEventKey = key;
-
-        // 🌟 广播，让 DAG / Timeline 同步刷新
-        this.emitter.emit();
     }
 
     getHoveredEventKey() {
         return this.hoveredEventKey;
+    }
+
+    isFlowFinished(): boolean {
+        if (!this.debugEngine) return false;
+        // 活跃步骤为 0，且已经有完成的步骤，即为全剧终
+        return this.debugEngine.getActiveSteps().length === 0 &&
+            this.debugEngine.getCompletedSteps().length > 0;
     }
 }

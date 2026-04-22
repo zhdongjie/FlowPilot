@@ -10,7 +10,7 @@ export class GuideController {
     public readonly runtime: FlowRuntime;
     public readonly collector: BehaviorCollector;
     private readonly orchestrator: GuideOrchestrator;
-    private readonly config: FlowConfig;
+    public readonly config: FlowConfig;
 
     constructor(options: {
         steps: GuideStep[];
