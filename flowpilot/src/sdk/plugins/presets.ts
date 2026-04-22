@@ -15,7 +15,7 @@ export type PluginPreset =
     typeof PluginPresets[keyof typeof PluginPresets];
 
 /**
- * 🚀 语义化 preset（工业级标准）
+ * 语义化 preset
  */
 export function resolvePresetPlugins(
     preset?: PluginPreset
