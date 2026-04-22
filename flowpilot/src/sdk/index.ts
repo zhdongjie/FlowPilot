@@ -14,14 +14,13 @@ export { FlowEngine } from './core/engine';
 // 导出插件协议与官方内置插件
 export type { FlowPlugin, FlowPluginContext } from './types/plugin';
 export { DevToolsPlugin } from './devtools/plugin';
-export { LoggerPlugin } from './plugins/logger'; // 假设你放在了 plugins 目录下
+export { LoggerPlugin } from './plugins/logger';
+export { AxiosPlugin } from './plugins/axios';
 
 // ==========================================
-// 3. 采集器与适配器 (Collectors & Adapters)
+// 3. 采集器 (Collectors)
 // ==========================================
-export { AxiosAdapter } from "./collector/adapters";
 export { BehaviorCollector } from "./collector/collector";
-export type { NetworkAdapter, EmitFunction } from "./types/collector";
 
 // ==========================================
 // 4. 类型定义 (Types)

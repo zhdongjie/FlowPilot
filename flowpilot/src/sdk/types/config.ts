@@ -1,9 +1,6 @@
 // src/sdk/types/config.ts
-import type { NetworkAdapter } from "./collector";
 
 export interface FlowConfig {
-    adapters?: NetworkAdapter[];
-
     // 1. 视觉主题配置
     theme: {
         primaryColor: string;    // 按钮和高亮主色

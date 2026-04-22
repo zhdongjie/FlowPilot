@@ -6,9 +6,9 @@ import MockAdapter from 'axios-mock-adapter'
 
 import {
     createFlowPilot,
-    AxiosAdapter,
     DevToolsPlugin,
-    LoggerPlugin
+    LoggerPlugin,
+    AxiosPlugin
 } from 'flowpilot'
 import { onboardingSteps } from './guide.config'
 
@@ -26,6 +26,15 @@ function initFlowPilot() {
 
         // 🌟 3. 【核心进化】能力组合层：想要什么功能，就插什么插件！
         plugins: [
+            AxiosPlugin(axios, (res) => {
+                if (res.data.message === 'success') {
+                    return `${res.config.url?.replace('/api/', '')}_success`;
+                }
+                if (res.status === 200 && res.data?.code) {
+                    return res.data.code;
+                }
+                return null;
+            }),
             LoggerPlugin({
                 prefix: 'MyApp-Guide',  // 定制化前缀
                 ignoreNoise: true,      // 自动屏蔽 focus/blur
@@ -35,13 +44,6 @@ function initFlowPilot() {
         ],
 
         config: {
-            adapters: [
-                new AxiosAdapter(axios, (res) => {
-                    if (res.data.message === 'success') return `${res.config.url?.replace('/api/', '')}_success`;
-                    if (res.status === 200 && res.data?.code) return res.data.code;
-                    return null;
-                })
-            ],
             theme: { primaryColor: '#007aff', maskColor: 'rgba(0,0,0,0.65)', borderRadius: '8px', textColor: '#333', zIndex: 9999 },
             ui: { defaultPosition: 'bottom', defaultNextLabel: '好的，下一步' },
             runtime: {
