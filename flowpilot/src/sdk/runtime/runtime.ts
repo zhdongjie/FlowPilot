@@ -26,22 +26,40 @@ export class FlowRuntime {
         }
 
         // 2. 初始化插件上下文 (沙箱化控制权)
-        this.pluginManager.setup({
-            runtime: this,
-            engine: this.engine,
-            dispatch: (signal) => this.dispatch(signal),
-            getState: () => ({
-                activeSteps: this.engine.getActiveSteps(),
-                completedSteps: this.engine.getCompletedSteps()
-            }),
-            now: () => Date.now()
-        });
+        this.initPluginContext();
 
         // 3. 监听引擎状态变化，转换为插件周期的 Hook
         this.engine.onStateChange ??= () => {
             this.stateEmitter.emit();
-            this.pluginManager.emit("onRender"); // 触发渲染钩子
+            this.pluginManager.emitHook("onRender");
         };
+    }
+
+    /**
+     * 提取上下文初始化逻辑，方便 reset 时重建
+     */
+    private initPluginContext() {
+        this.pluginManager.setup({
+            runtime: this,
+            engine: this.engine,
+            config: this.config,
+
+            // 暴露信号发射权
+            dispatch: (signal) => this.dispatch(signal),
+
+            // 状态快照
+            getState: () => ({
+                activeSteps: this.engine.getActiveSteps(),
+                completedSteps: this.engine.getCompletedSteps(),
+                isFinished: this.engine.getActiveSteps().length === 0 &&
+                    this.engine.getCompletedSteps().length > 0
+            }),
+            now: () => Date.now(),
+
+            // 注入跨插件通信能力，代理到 pluginManager 的 EventBus 上
+            emit: (event, payload) => this.pluginManager.emitEvent(event, payload),
+            on: (event, cb) => this.pluginManager.onEvent(event, cb)
+        });
     }
 
     // =========================
@@ -106,11 +124,6 @@ export class FlowRuntime {
                         this.engine.forceComplete(id);
                     });
 
-                    if (this.config.debug) {
-                        console.log(
-                            `[FlowPilot] 💾 恢复进度: ${completedIds.join(", ")}`
-                        );
-                    }
                 } catch {
                     localStorage.removeItem(persistence.key);
                 }
@@ -123,7 +136,7 @@ export class FlowRuntime {
         // 🌟 首次广播
         this.stateEmitter.emit();
 
-        this.pluginManager.emit("onStart");
+        this.pluginManager.emitHook("onStart");
     }
 
     public stop() {
@@ -132,7 +145,7 @@ export class FlowRuntime {
 
         this.engine.stop();
 
-        this.pluginManager.emit("onStop");
+        this.pluginManager.emitHook("onStop");
     }
 
     // =========================
@@ -140,7 +153,15 @@ export class FlowRuntime {
     // =========================
 
     public dispatch(signal: Signal) {
-        this.pluginManager.emit("onSignal", signal);
+        // 通过插件链过滤信号
+        const shouldPass = this.pluginManager.emitSignal(signal);
+
+        // 🛡如果有任何一个插件明确返回 false，直接熔断，丢弃该信号！
+        if (!shouldPass) {
+            return;
+        }
+
+        // 放行，进入核心引擎
         this.engine.ingest(signal);
 
         this.scheduleNext();
@@ -168,9 +189,6 @@ export class FlowRuntime {
         this.stateEmitter.emit();
     }
 
-    /**
-     * 🌟 推荐给业务层使用（抽象更高）
-     */
     public revertToStep(stepId: string) {
         const traceLogs = this.engine.getTraceStore().all();
 
@@ -205,9 +223,6 @@ export class FlowRuntime {
         );
     }
 
-    /**
-     * 🌟 业务 API：清缓存（不再让业务碰 localStorage）
-     */
     public clearCache() {
         const { persistence } = this.config.runtime;
 
@@ -219,30 +234,22 @@ export class FlowRuntime {
         localStorage.removeItem(`${key}_finished`);
     }
 
-    /**
-     * 🌟 可选增强：清缓存 + 重启（推荐你加）
-     */
     public reset() {
-        // 1. 清缓存
         this.clearCache();
-
-        // 2. 停止当前调度器
         this.stop();
 
-        // 3. 🌟 关键：重建 engine（彻底干净）
         const { steps, rootStepId } = this.engine.getConfigSnap();
+        this.engine.stop();
 
-        this.engine.stop(); // 确保心跳关掉
-
-        // ⚠️ 直接 new 一个全新的 engine（最干净）
         this.engine = new FlowEngine(steps, rootStepId);
 
-        // 重新绑定事件
         this.engine.onStateChange = () => {
             this.stateEmitter.emit();
+            this.pluginManager.emitHook("onRender");
         };
 
-        // 4. 重新启动
+        this.initPluginContext();
+
         this.start();
     }
 

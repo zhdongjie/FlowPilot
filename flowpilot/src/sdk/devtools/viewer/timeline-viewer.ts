@@ -41,42 +41,76 @@ export class TimelineViewer {
     }
 
     private render() {
-        const events = [...this.devtools.getEvents()].reverse();
+        const allEvents = [...this.devtools.getEvents()].reverse();
+
+        // 🌟🌟🌟 核心过滤与清洗逻辑 🌟🌟🌟
+        const displayEvents = allEvents.filter(event => {
+            // 1. 过滤掉引擎内部瞬间结算产生的噪音
+            if (event.type === 'FACT_APPLIED' || event.type === 'STEP_ADVANCE') {
+                return false;
+            }
+            return true;
+        });
+
         this.listRoot.innerHTML = "";
 
-        events.forEach(event => {
+        displayEvents.forEach(event => {
             const card = document.createElement("div");
-            card.className = "fp-event-card"; // 🌟 使用 CSS Class
-
-            // 设定不同类型的边框颜色
+            card.className = "fp-event-card";
             this.styleEventCard(card, event);
 
-            card.innerHTML = `
-                <div style="font-size: 10px; color: #666;">${new Date(event.timestamp).toLocaleTimeString()}</div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
-                    <span style="font-size: 12px;">
-                        <b style="color: #f39c12;">${event.type}</b> 
-                        <i style="color: #aaa; margin-left: 6px;">${event.key || event.stepId || ''}</i>
-                    </span>
-                    <button class="fp-rewind-btn">回溯</button>
-                </div>
-            `;
+            // 🌟 判断是否是高频的、无需回溯的“噪音输入”
+            const isNoiseSignal = event.type === 'SIGNAL_INGEST' &&
+                (event.key?.startsWith('focus_') || event.key?.startsWith('blur_') || event.key?.startsWith('input_'));
 
-            // 🌟 仅处理联动逻辑，不操作 DOM
-            card.onmouseenter = () => {
-                this.devtools.setHoveredEventKey(event.key || null);
-            };
-            card.onmouseleave = () => {
-                this.devtools.setHoveredEventKey(null);
-            };
+            if (isNoiseSignal) {
+                // 如果是焦点事件，让它变灰，且不显示回溯按钮
+                card.style.opacity = "0.5";
+                card.style.borderLeftColor = "#555";
+                card.innerHTML = `
+                    <div style="font-size: 10px; color: #666;">${new Date(event.timestamp).toLocaleTimeString()}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                        <span style="font-size: 12px; color: #888;">
+                            <i>${event.key}</i>
+                        </span>
+                    </div>
+                `;
+            } else {
+                // 如果是重要事件（步骤切换、关键点击、网络请求）
+                const titleColor = event.type === 'STEP_ACTIVATE' ? '#007aff' :
+                    event.type === 'SIGNAL_INGEST' ? '#f39c12' : '#fff';
 
-            // 🌟 回溯按钮点击
-            const rewindBtn = card.querySelector('.fp-rewind-btn') as HTMLElement;
-            rewindBtn.onclick = (e) => {
-                e.stopPropagation();
-                console.log("⏪ 正在回溯至:", event.timestamp);
-                this.devtools.rewindTime(this.runtime, event.timestamp);
-            };
+                card.innerHTML = `
+                    <div style="font-size: 10px; color: #666;">${new Date(event.timestamp).toLocaleTimeString()}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+                        <span style="font-size: 12px;">
+                            <b style="color: ${titleColor};">${event.type}</b> 
+                            <i style="color: #ccc; margin-left: 6px;">${event.key || event.stepId || ''}</i>
+                        </span>
+                        <button class="fp-rewind-btn" style="
+                            background: #007aff; 
+                            color: #fff; 
+                            border: none; 
+                            cursor: pointer; 
+                            padding: 4px 8px; 
+                            border-radius: 4px; 
+                            font-size: 10px; 
+                            font-weight: bold;
+                        ">⏪ 回溯</button>
+                    </div>
+                `;
+
+                // 绑定回溯事件
+                const rewindBtn = card.querySelector('.fp-rewind-btn') as HTMLElement;
+                rewindBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    this.devtools.rewindTime(this.runtime, event.timestamp);
+                };
+            }
+
+            // 保持 DAG 高亮联动
+            card.onmouseenter = () => this.devtools.setHoveredEventKey(event.key || null);
+            card.onmouseleave = () => this.devtools.setHoveredEventKey(null);
 
             this.listRoot.appendChild(card);
         });

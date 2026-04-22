@@ -26,7 +26,11 @@ function initFlowPilot() {
 
         // 🌟 3. 【核心进化】能力组合层：想要什么功能，就插什么插件！
         plugins: [
-            LoggerPlugin(), // 自动在控制台打印信号与状态变更
+            LoggerPlugin({
+                prefix: 'MyApp-Guide',  // 定制化前缀
+                ignoreNoise: true,      // 自动屏蔽 focus/blur
+                showTiming: true        // 开启耗时统计
+            }),
             DevToolsPlugin() // 开启神级可视化控制台
         ],
 
@@ -44,13 +48,7 @@ function initFlowPilot() {
                 pollingInterval: 50, autoStart: true, attributeName: 'data-fp',
                 signalPrefix: { click: 'click_', focus: 'focus_', blur: 'blur_', input: 'input_' },
                 persistence: { enabled: true, key: 'flowpilot_onboarding_v1' }
-            },
-            hooks: {
-                onStepStart: (stepId:string) => console.log(`[业务侧] 用户到达了节点: ${stepId}`),
-                onStepComplete: (stepId:string) => console.log(`[业务侧] 用户完成了节点: ${stepId}`),
-                onFlowComplete: () => console.log(`[业务侧] 恭喜！整个剧本通关！`)
-            },
-            debug: true
+            }
         }
     });
 

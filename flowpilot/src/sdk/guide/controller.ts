@@ -64,14 +64,6 @@ export class GuideController {
             const activeId = this.runtime.activeSteps[0];
             if (!activeId) return;
 
-            // 调试模式日志
-            if (this.config.debug) {
-                console.log(`[FlowPilot] 🖱️ 用户点击“下一步”: ${activeId}`);
-            }
-
-            // 触发步骤完成钩子
-            this.config.hooks.onStepComplete?.(activeId);
-
             const clickPrefix = this.config.runtime.signalPrefix.click;
             this.runtime.dispatch({
                 id: `btn_${Date.now()}`,
@@ -89,15 +81,8 @@ export class GuideController {
             // 我们约定：全剧终的标记键名是配置 key 加上 '_finished'
             const isFinished = localStorage.getItem(`${persistence.key}_finished`);
             if (isFinished === 'true') {
-                if (this.config.debug) {
-                    console.log(`💤 [FlowPilot] 检查到已通关记录，引导引擎自动休眠。`);
-                }
-                return; // 极速退出，一丁点性能都不浪费！
+                return;
             }
-        }
-
-        if (this.config.debug) {
-            console.log("🚀 [FlowPilot] 引导引擎启动...");
         }
 
         this.runtime.start();

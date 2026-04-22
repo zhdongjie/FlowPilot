@@ -36,15 +36,6 @@ export interface FlowConfig {
         };
         attributeName: string;
     };
-
-    // 4. 生命周期钩子 (用于业务埋点或联动)
-    hooks: {
-        onStepStart?: (stepId: string) => void;
-        onStepComplete?: (stepId: string) => void;
-        onFlowComplete?: () => void;
-    };
-
-    debug: boolean; // 是否开启控制台日志
 }
 
 export const DEFAULT_CONFIG: FlowConfig = {
@@ -73,7 +64,5 @@ export const DEFAULT_CONFIG: FlowConfig = {
             input: 'input_'
         },
         attributeName: 'data-fp'
-    },
-    hooks: {},
-    debug: false
+    }
 };
