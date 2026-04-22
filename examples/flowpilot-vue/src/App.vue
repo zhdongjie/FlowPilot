@@ -33,9 +33,6 @@ const handleSubmit = async () => {
 // ---------------- 返回（🌟 只调 SDK API） ----------------
 const handleGoBack = () => {
   showForm.value = false
-
-  // ❌ 不再操作 trace / engine
-  runtime?.revertToStep?.('step_open_account')
 }
 
 // ---------------- 重置（🌟 正确做法） ----------------

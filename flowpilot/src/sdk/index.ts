@@ -1,31 +1,40 @@
 // flowpilot/src/sdk/index.ts
 
-import {FlowEngine} from './core/engine';
-import {FlowParser} from './compiler/parser';
-import type {Condition, Step} from './types';
-
+// ---------------- Core ----------------
 export { FlowEngine } from './core/engine';
 export { FlowParser } from './compiler/parser';
 export { GuideController } from "./guide/controller";
-export type { GuideStep } from "./types/guide";
-
-export { AxiosAdapter } from "./collector/adapters";
-export type { NetworkAdapter, EmitFunction } from "./types/collector";
-
-export { FlowDevTools } from './devtools/controller';
 export { FlowRuntime } from './runtime/runtime';
 
-export { DAGRenderer } from "./devtools/dag/renderer";
-export { buildGraph } from "./devtools/dag/builder";
+// ---------------- Types ----------------
+export type { GuideStep } from "./types/guide";
+export type { NetworkAdapter, EmitFunction } from "./types/collector";
 
-// 定义用户可能传入的带字符串语法糖的 Step
+// ---------------- Collector ----------------
+export { AxiosAdapter } from "./collector/adapters";
+
+// ---------------- DevTools Core ----------------
+export { FlowDevTools } from './devtools/controller';
+export { buildGraph } from "./devtools/dag/builder";
+export { DevToolsPlugin } from './devtools/plugin';
+
+// ---------------- DevTools UI（可选导出）----------------
+export { FlowDevToolsPanel } from "./devtools/viewer/panel";
+
+export { createFlowGuide } from "./guide/factory";
+
+
+// ---------------- DSL 工厂 ----------------
+import { FlowEngine } from './core/engine';
+import { FlowParser } from './compiler/parser';
+import type { Condition, Step } from './types';
+
 export interface DslStep extends Omit<Step, 'when'> {
     when: string | Condition;
 }
 
 /**
  * FlowPilot 工业级入口点
- * 自动拦截字符串 DSL 并将其编译为 AST，随后启动引擎
  */
 export function createFlowPilot(steps: DslStep[], rootId: string): FlowEngine {
     const compiledSteps: Step[] = steps.map(step => {
@@ -40,4 +49,3 @@ export function createFlowPilot(steps: DslStep[], rootId: string): FlowEngine {
 
     return new FlowEngine(compiledSteps, rootId);
 }
-
