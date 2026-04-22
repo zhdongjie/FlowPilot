@@ -5,6 +5,13 @@ import type { FlowEngine } from "../core/engine";
 import type { Signal } from "./signal";
 import type { FlowConfig } from "./config";
 
+export type PluginState =
+    | "created"
+    | "initialized"
+    | "running"
+    | "paused"
+    | "disposed";
+
 export interface FlowPluginContext {
     // 1. 核心实例
     runtime: FlowRuntime;
@@ -33,19 +40,23 @@ export interface FlowPlugin {
     name: string;
 
     // =========================
+    // 优先级
+    // =========================
+    priority?: number; // 默认 0，越大越先执行
+
+    state?: PluginState;
+
+    // =========================
     // 生命周期
     // =========================
     setup?(ctx: FlowPluginContext): void;
     onStart?(ctx: FlowPluginContext): void;
+    onPause?(ctx: FlowPluginContext): void;
+    onResume?(ctx: FlowPluginContext): void;
     onStop?(ctx: FlowPluginContext): void;
 
     /** 释放资源 */
     onDispose?(ctx: FlowPluginContext): void;
-
-    // =========================
-    // 优先级
-    // =========================
-    priority?: number; // 默认 0，越大越先执行
 
     // =========================
     // signal middleware

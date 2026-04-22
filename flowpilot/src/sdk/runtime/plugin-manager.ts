@@ -1,24 +1,34 @@
 // src/sdk/runtime/plugin-manager.ts
 
-import type { Signal, FlowPlugin, FlowPluginContext } from "../types";
+import type {
+    Signal,
+    FlowPlugin,
+    FlowPluginContext,
+    PluginState
+} from "../types";
 
 export class PluginManager {
     private plugins: FlowPlugin[] = [];
     private ctx!: FlowPluginContext;
 
+    // 防止 setup 重复执行
+    private initialized = new WeakSet<FlowPlugin>();
+
+    // Event Bus
     private readonly eventBus = new Map<string, Array<(payload: any) => void>>();
 
     // =========================
-    // 注册（支持 priority）
+    // 注册插件（支持覆盖 + priority）
     // =========================
     register(plugins: FlowPlugin[]) {
         const map = new Map<string, FlowPlugin>();
 
-        // 1. 合并（后者覆盖前者）
+        // 保留旧插件
         for (const p of this.plugins) {
             if (p?.name) map.set(p.name, p);
         }
 
+        // 新插件覆盖旧插件
         for (const p of plugins) {
             if (!p?.name) continue;
             map.set(p.name, p);
@@ -26,27 +36,78 @@ export class PluginManager {
 
         this.plugins = Array.from(map.values());
 
-        // 按 priority 排序（核心升级点）
+        // priority 排序（越大越先执行）
         this.plugins.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     }
 
     // =========================
-    // setup
+    // 初始化上下文
     // =========================
     setup(ctx: FlowPluginContext) {
         this.ctx = ctx;
 
         for (const p of this.plugins) {
-            try {
-                p.setup?.(ctx);
-            } catch (e) {
-                console.error(`[FlowPilot] Plugin '${p.name}' setup failed:`, e);
-            }
+            this.setPluginState(p, "initialized");
         }
     }
 
     // =========================
-    // signal middleware（链式升级）
+    // 生命周期状态机（核心）
+    // =========================
+    setPluginState(plugin: FlowPlugin, next: PluginState) {
+        const prev = plugin.state;
+        if (prev === next) return;
+
+        switch (next) {
+            case "initialized":
+                if (!this.initialized.has(plugin)) {
+                    plugin.setup?.(this.ctx);
+                    this.initialized.add(plugin);
+                }
+                break;
+
+            case "running":
+                plugin.onStart?.(this.ctx);
+                break;
+
+            case "paused":
+                plugin.onPause?.(this.ctx);
+                break;
+
+            case "disposed":
+                plugin.onDispose?.(this.ctx);
+                break;
+        }
+
+        plugin.state = next;
+    }
+
+    // =========================
+    // 外部生命周期 API
+    // =========================
+    start() {
+        for (const p of this.plugins) {
+            this.setPluginState(p, "running");
+        }
+    }
+
+    pause() {
+        for (const p of this.plugins) {
+            this.setPluginState(p, "paused");
+        }
+    }
+
+    destroy() {
+        for (const p of this.plugins) {
+            this.setPluginState(p, "disposed");
+        }
+
+        this.plugins = [];
+        this.initialized = new WeakSet();
+    }
+
+    // =========================
+    // Signal middleware（拦截链）
     // =========================
     emitSignal(signal: Signal): boolean {
         if (!this.ctx) return true;
@@ -57,11 +118,14 @@ export class PluginManager {
             try {
                 const result = p.onSignal(signal, this.ctx);
 
-                // 中断链
+                // 拦截 signal
                 if (result === false) return false;
 
             } catch (e) {
-                console.error(`[FlowPilot] Plugin '${p.name}' onSignal failed:`, e);
+                console.error(
+                    `[FlowPilot] Plugin '${p.name}' onSignal failed:`,
+                    e
+                );
                 this.triggerError(e as Error);
             }
         }
@@ -70,9 +134,12 @@ export class PluginManager {
     }
 
     // =========================
-    // hook dispatch
+    // Hook dispatch
     // =========================
-    emitHook<K extends keyof Omit<FlowPlugin, 'name' | 'onSignal' | 'setup' | 'onError' | 'onDispose' | 'priority'>>(
+    emitHook<K extends keyof Omit<
+        FlowPlugin,
+        "name" | "onSignal" | "setup" | "onError" | "onDispose" | "priority"
+    >>(
         hook: K,
         ...args: any[]
     ) {
@@ -85,14 +152,17 @@ export class PluginManager {
             try {
                 (fn as any)(...args, this.ctx);
             } catch (e) {
-                console.error(`[FlowPilot] Plugin '${p.name}' hook '${hook}' failed:`, e);
+                console.error(
+                    `[FlowPilot] Plugin '${p.name}' hook '${hook}' failed:`,
+                    e
+                );
                 this.triggerError(e as Error);
             }
         }
     }
 
     // =========================
-    // error
+    // Error system
     // =========================
     private triggerError(error: Error) {
         if (!this.ctx) return;
@@ -100,27 +170,14 @@ export class PluginManager {
         for (const p of this.plugins) {
             try {
                 p.onError?.(error, this.ctx);
-            } catch {}
-        }
-    }
-
-    // =========================
-    // dispose
-    // =========================
-    dispose() {
-        for (const p of this.plugins) {
-            try {
-                p.onDispose?.(this.ctx);
-            } catch (e) {
-                console.warn(`[FlowPilot] Plugin '${p.name}' dispose failed:`, e);
+            } catch {
+                // ignore plugin error crash
             }
         }
-
-        this.plugins = [];
     }
 
     // =========================
-    // event bus
+    // Event Bus
     // =========================
     emitEvent(event: string, payload?: any) {
         this.eventBus.get(event)?.forEach(cb => cb(payload));
@@ -136,6 +193,7 @@ export class PluginManager {
         return () => {
             const arr = this.eventBus.get(event);
             if (!arr) return;
+
             const idx = arr.indexOf(cb);
             if (idx > -1) arr.splice(idx, 1);
         };
