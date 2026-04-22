@@ -3,12 +3,16 @@
 import type { FlowPlugin, FlowPluginContext, Signal } from "../types";
 
 export function DOMPlugin(): FlowPlugin {
+    let handler: ((e: Event) => void) | null = null;
+
     return {
         name: "fx-dom-plugin",
+        priority: 5,
+
         setup(ctx: FlowPluginContext) {
             const config = ctx.config.runtime;
 
-            const handler = (e: Event) => {
+            handler = (e: Event) => {
                 let el = e.target as HTMLElement | null;
 
                 while (el && el !== document.body) {
@@ -43,6 +47,17 @@ export function DOMPlugin(): FlowPlugin {
             document.addEventListener("focusin", handler, true);
             document.addEventListener("focusout", handler, true);
             document.addEventListener("input", handler, true);
+        },
+
+        onDispose() {
+            if (!handler) return;
+
+            document.removeEventListener("click", handler, true);
+            document.removeEventListener("focusin", handler, true);
+            document.removeEventListener("focusout", handler, true);
+            document.removeEventListener("input", handler, true);
+
+            handler = null;
         }
     };
 }

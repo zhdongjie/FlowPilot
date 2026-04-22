@@ -32,20 +32,24 @@ export interface FlowPlugin {
     /** 插件唯一名称 */
     name: string;
 
-    // ==========================================
-    // 🚀 生命周期钩子
-    // ==========================================
+    // =========================
+    // 生命周期
+    // =========================
     setup?(ctx: FlowPluginContext): void;
     onStart?(ctx: FlowPluginContext): void;
     onStop?(ctx: FlowPluginContext): void;
 
-    // ==========================================
-    // 🛡️ 拦截器钩子 (Middleware)
-    // ==========================================
-    /**
-     * 当信号到达时触发。
-     * @returns 返回 false 则拦截该信号，阻止其进入 Engine；不返回或返回 true 则放行。
-     */
+    /** 释放资源 */
+    onDispose?(ctx: FlowPluginContext): void;
+
+    // =========================
+    // 优先级
+    // =========================
+    priority?: number; // 默认 0，越大越先执行
+
+    // =========================
+    // signal middleware
+    // =========================
     onSignal?(signal: Signal, ctx: FlowPluginContext): boolean | void;
 
     // ==========================================
@@ -54,10 +58,10 @@ export interface FlowPlugin {
     onStepStart?(stepId: string, ctx: FlowPluginContext): void;
     onStepComplete?(stepId: string, ctx: FlowPluginContext): void;
 
-    /** 🌟 整个剧本全部通关时触发 */
+    /** 整个剧本全部通关时触发 */
     onFlowComplete?(ctx: FlowPluginContext): void;
 
-    /** 🌟 引擎或运行时发生错误时触发，方便做异常监控 */
+    /** 引擎或运行时发生错误时触发，方便做异常监控 */
     onError?(error: Error, ctx: FlowPluginContext): void;
 
     // ==========================================
@@ -70,7 +74,7 @@ export interface AxiosPluginOptions {
     instance: any;
 
     extractor?: (res: any) => string | null | undefined;
-    
+
     name?: string;
     enableErrorHook?: boolean;
     timeout?: number;

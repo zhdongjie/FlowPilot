@@ -40,6 +40,7 @@ export function LoggerPlugin(options: LoggerPluginOptions = {}): FlowPlugin {
 
     return {
         name: "fp-logger",
+        priority: 0,
 
         onStart(ctx: FlowPluginContext) {
             const state = ctx.getState();

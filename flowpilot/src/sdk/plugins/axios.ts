@@ -13,6 +13,7 @@ export function AxiosPlugin(options: AxiosPluginOptions): FlowPlugin {
 
     return {
         name,
+        priority: 10,
 
         setup(ctx: FlowPluginContext) {
             interceptorId = instance.interceptors.response.use(
@@ -52,7 +53,7 @@ export function AxiosPlugin(options: AxiosPluginOptions): FlowPlugin {
             );
         },
 
-        onStop() {
+        onDispose() {
             if (interceptorId !== null) {
                 instance.interceptors.response.eject(interceptorId);
                 interceptorId = null;
