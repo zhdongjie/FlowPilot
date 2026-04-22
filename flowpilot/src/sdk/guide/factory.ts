@@ -1,31 +1,20 @@
-import { GuideController } from "./controller";
+// src/sdk/guide/factory.ts
 
-export interface FlowGuideOptions {
-    steps: any[];
+import { GuideController } from "./controller";
+import { FlowConfig, FlowPlugin, GuideStep } from "../types";
+
+export interface FlowPilotOptions {
+    steps: GuideStep[];
     rootStepId: string;
-    adapters?: any[];
-    theme?: any;
-    ui?: any;
-    runtime?: any;
-    hooks?: any;
-    debug?: boolean;
+    config?: Partial<FlowConfig>;
+    plugins?: FlowPlugin[];
 }
 
-export function createFlowGuide(options: FlowGuideOptions) {
-    const guide = new GuideController({
+export function createFlowPilot(options: FlowPilotOptions) {
+    return new GuideController({
         steps: options.steps,
         rootStepId: options.rootStepId,
-        config: {
-            adapters: options.adapters,
-            theme: options.theme,
-            ui: options.ui,
-            runtime: options.runtime,
-            hooks: options.hooks,
-            debug: options.debug
-        }
+        config: options.config,
+        plugins: options.plugins
     });
-
-    guide.start();
-
-    return guide;
 }

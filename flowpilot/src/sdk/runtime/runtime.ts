@@ -1,8 +1,9 @@
 // src/sdk/runtime/runtime.ts
 
 import { FlowEngine } from "../core/engine";
-import type { FlowConfig, Signal, Step } from "../types";
+import type {FlowConfig, FlowPlugin, Signal, Step} from "../types";
 import { EventEmitter } from "../utils/emitter";
+import { PluginManager } from "./plugin-manager";
 
 export class FlowRuntime {
     public engine: FlowEngine;
@@ -13,17 +14,33 @@ export class FlowRuntime {
     // 🌟 状态广播器（唯一数据出口）
     private readonly stateEmitter = new EventEmitter<void>();
 
-    constructor(options: {
-        steps: Step[],
-        rootStepId: string,
-        config: FlowConfig
-    }) {
+    private readonly pluginManager = new PluginManager();
+
+    constructor(options: { steps: Step[], rootStepId: string, config: FlowConfig, plugins?: FlowPlugin[] }) {
         this.engine = new FlowEngine(options.steps, options.rootStepId);
         this.config = options.config;
 
-        // 🌟 引擎状态变化 → Runtime 广播
+        // 1. 注册插件
+        if (options.plugins) {
+            this.pluginManager.register(options.plugins);
+        }
+
+        // 2. 初始化插件上下文 (沙箱化控制权)
+        this.pluginManager.setup({
+            runtime: this,
+            engine: this.engine,
+            dispatch: (signal) => this.dispatch(signal),
+            getState: () => ({
+                activeSteps: this.engine.getActiveSteps(),
+                completedSteps: this.engine.getCompletedSteps()
+            }),
+            now: () => Date.now()
+        });
+
+        // 3. 监听引擎状态变化，转换为插件周期的 Hook
         this.engine.onStateChange ??= () => {
             this.stateEmitter.emit();
+            this.pluginManager.emit("onRender"); // 触发渲染钩子
         };
     }
 
@@ -105,6 +122,8 @@ export class FlowRuntime {
 
         // 🌟 首次广播
         this.stateEmitter.emit();
+
+        this.pluginManager.emit("onStart");
     }
 
     public stop() {
@@ -112,6 +131,8 @@ export class FlowRuntime {
         this.timer = null;
 
         this.engine.stop();
+
+        this.pluginManager.emit("onStop");
     }
 
     // =========================
@@ -119,6 +140,7 @@ export class FlowRuntime {
     // =========================
 
     public dispatch(signal: Signal) {
+        this.pluginManager.emit("onSignal", signal);
         this.engine.ingest(signal);
 
         this.scheduleNext();

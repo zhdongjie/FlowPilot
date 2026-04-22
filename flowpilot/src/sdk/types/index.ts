@@ -7,3 +7,4 @@ export * from './runtime';
 export * from './guide';
 export * from './collector';
 export * from './config';
+export * from './plugin';

@@ -2,7 +2,7 @@
 import { FlowRuntime } from "../runtime/runtime";
 import { BehaviorCollector } from "../collector/collector";
 import { GuideOrchestrator } from "./orchestrator";
-import type { GuideStep } from "../types";
+import type { FlowPlugin, GuideStep } from "../types";
 import { FlowParser } from "../compiler/parser";
 import { FlowConfig, DEFAULT_CONFIG } from "../types";
 
@@ -15,7 +15,8 @@ export class GuideController {
     constructor(options: {
         steps: GuideStep[];
         rootStepId: string;
-        config?: Partial<FlowConfig>; // 接受部分配置覆盖
+        config?: Partial<FlowConfig>;
+        plugins?: FlowPlugin[];
     }) {
         // 1. 深度合并配置 (用传入的覆盖默认的)
         this.config = {
@@ -33,7 +34,8 @@ export class GuideController {
         this.runtime = new FlowRuntime({
             steps: compiledSteps,
             rootStepId: options.rootStepId,
-            config: this.config
+            config: this.config,
+            plugins: options.plugins
         });
 
         // 4. 初始化采集层 (从 config 中提取适配器)

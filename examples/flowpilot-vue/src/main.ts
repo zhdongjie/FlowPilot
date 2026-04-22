@@ -7,8 +7,8 @@ import MockAdapter from 'axios-mock-adapter'
 import {
     createFlowPilot,
     AxiosAdapter,
-    FlowDevTools,
-    FlowDevToolsPanel
+    DevToolsPlugin,
+    LoggerPlugin
 } from 'flowpilot'
 import { onboardingSteps } from './guide.config'
 
@@ -19,10 +19,17 @@ mock.onPost('/api/submit').reply(200, { code: 'submit_success' });
 
 // ---------------- SDK Factory ----------------
 function initFlowPilot() {
-    // 🌟 1. 启动你的“全能大管家”
+    // 🌟 2. 启动全能大管家，以极其优雅的方式组合能力
     const guide = createFlowPilot({
         steps: onboardingSteps,
         rootStepId: "step_login",
+
+        // 🌟 3. 【核心进化】能力组合层：想要什么功能，就插什么插件！
+        plugins: [
+            LoggerPlugin(), // 自动在控制台打印信号与状态变更
+            DevToolsPlugin() // 开启神级可视化控制台
+        ],
+
         config: {
             adapters: [
                 new AxiosAdapter(axios, (res) => {
@@ -47,18 +54,8 @@ function initFlowPilot() {
         }
     });
 
-    // 🚀 2. 启动引擎，你的 Collector 和 Orchestrator 会在这里跑起来，气泡复活！
+    // 🚀 4. 启动引擎！所有的插件会收到 onStart 钩子自动激活
     guide.start();
-
-    // 🌟 3. 挂载神级 DevTools，连接到 guide.runtime 大脑
-    if (guide.config?.debug) {
-        const devtools = new FlowDevTools();
-        // DevTools 只像寄生虫一样连上大脑，完全不影响你原来写的 Orchestrator
-        devtools.connect(guide.runtime);
-
-        const panel = new FlowDevToolsPanel({ devtools, runtime: guide.runtime });
-        panel.mount();
-    }
 
     return guide;
 }
@@ -68,7 +65,7 @@ const app = createApp(App)
 
 const guide = initFlowPilot()
 
-// 把你的 guide 整体注入，如果 App.vue 想调用重置，可以直接用 guide.runtime.clearCache()
+// 把你的 guide 整体注入
 app.provide('flowGuide', guide)
 app.provide('flowRuntime', guide.runtime)
 
