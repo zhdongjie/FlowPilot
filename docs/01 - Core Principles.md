@@ -1,70 +1,77 @@
-# FlowPilot SDK - Core Principles v1.1
+# FlowPilot SDK - Core Principles
 
-## 1. SDK 核心目标
+## 1. 核心目标
 
-FlowPilot 只解决一个问题：
+FlowPilot 的核心目标只有一个：
 
-> 在前端系统中，判断用户是否完成某个步骤
+> 在前端系统中，基于可追踪的信号流，判断用户是否完成了某个步骤，以及当前流程推进到了哪里。
 
-------
+它不是单纯的浮层组件，而是一套围绕“步骤推进”组织起来的运行时。
 
-## 2. SDK 职责边界
+## 2. 当前代码中的职责边界
 
-### ✅ SDK负责：
+### SDK负责
 
-- 采集用户行为信号（interaction / navigation / custom）
-- 统一转换为 Signal Key
-- 维护 Signal Store（Event + Fact）
-- 推进 Step 状态机
-- 提供可控的状态回滚能力（Control）
+- 接收并处理语义化 Signal
+- 维护 append-only 的信号历史
+- 基于条件树推进步骤状态
+- 处理 `enterWhen`、`cancelWhen`、`timer(...)` 等时间和门控语义
+- 提供重放、回溯、持久化恢复、定时器重建能力
+- 提供 Guide、Session、Registry、DevTools 这些上层能力
 
-------
+### SDK不负责
 
-### ❌ SDK不负责：
-
-- 不判断接口成功或失败（默认）
-- 不解析业务逻辑
+- 不替业务决定接口是否成功，除非业务或插件显式把结果转换成 Signal
 - 不做表单校验
-- 不劫持网络请求
-- 不理解 DOM 结构语义
+- 不理解 DOM 的业务语义
+- 不维护后端业务状态
+- 当前没有内置 Navigation 采集插件
 
-------
-
-## 3. 核心设计原则
+## 3. 核心原则
 
 ### 原则1：Signal First
 
-Step 完成只依赖 Signal Key
+引擎只认 Signal，不直接认 DOM、按钮、接口或页面名称。
+步骤是否完成，取决于条件树在当前时间语义下是否成立。
 
-------
+### 原则2：语义必须显式存在
 
-### 原则2：语义唯一性
+没有语义化 key，就不应该生成 Signal。
+SDK 当前允许通过配置属性名、插件提取器或手动 dispatch 明确提供语义，但不鼓励从 `innerText`、样式或 DOM 结构推断语义。
 
-> ❗没有语义 Key，就没有 Signal
+### 原则3：历史优先于可变状态
 
-------
+当前实现以信号历史为基础，再由引擎维护派生索引和步骤状态。
+这让重放、回溯和 DevTools 调试都建立在同一条事实链路上。
 
-### 原则3：Event / Fact 分离
+### 原则4：流程模型是 DAG，不是单指针 FSM
 
-- Event：瞬时行为（click / route）
-- Fact：持久状态（login.success）
+当前实现允许：
 
-------
+- 多个步骤同时处于 `active`
+- 后继步骤先进入 `pending`，等待 `enterWhen`
+- 分支被 `cancelWhen` 主动切断
 
-### 原则4：单 Step 推进
+所以“同一时间只有一个 ACTIVE Step”的旧说法已经不适用。
 
-- 同一时间只有一个 ACTIVE Step
-- 不允许并行推进
+### 原则5：确定性优先
 
-------
+Signal 必须带绝对时间戳。
+在相同步骤定义和相同信号历史下，重放结果必须一致。
 
-### 原则5：可回滚（但不自动）
+### 原则6：回溯是时间切片，不是硬改状态
 
-- SDK 不判断失败
-- 但允许业务触发回滚
+当前实现的回溯语义不是“把状态改回去”，而是：
 
-------
+1. 截断目标时间之后的信号
+2. 重建引擎状态
+3. 重建定时器和派生索引
 
-## 4. 系统本质
+### 原则7：一条 Runtime 对应一条 Flow
 
-> Signal-driven Step State Machine with controlled rollback
+单个 `FlowRuntime` / `GuideController` 只承载一条 guide 实例。
+如果一个系统里有多条 guide，需要通过 `GuideSessionManager` 或 `createGuideRegistryService` 在更外层做切换和销毁。
+
+## 4. 当前系统本质
+
+> FlowPilot 是一套 signal-driven、time-aware、DAG-based 的步骤运行时。

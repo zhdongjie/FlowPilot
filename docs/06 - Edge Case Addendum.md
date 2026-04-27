@@ -1,270 +1,133 @@
-# FlowPilot SDK - Edge Case Addendum v1.1
+# 06 - Edge Case Addendum
 
-------
+## 1. 不再使用旧的 `facts: Set` 模型
 
-## 1. Fact 生命周期（新增强约束）
+当前代码已经不再以 `facts: Set<string>` 作为权威存储结构。
 
-------
+真实实现是：
 
-### 结论（写死规则）
+- `SignalStore` 保存 append-only 的 `events`
+- `FlowEngine` 基于历史信号维护 `factMap` 和 `eventIndex`
 
-> Fact 的生命周期 = Flow Instance 生命周期
+因此，旧文档中“Fact 生命周期 = Flow 生命周期”的说法不再适合作为实现描述。
 
-------
+更准确的说法是：
 
-## 1.1 行为定义
+> 当前系统把“某个 key 是否已经发生过”视为从信号历史推导出来的派生结果。
 
-- Fact 一旦写入 Store（facts: Set）
-- 在当前 Flow Instance 内 **永久有效**
-- 不会自动失效
-- 不会被覆盖
-- 不会被删除（v1）
+## 2. 重复信号如何处理
 
-------
+当前 `SignalStore` 会基于 `signal.id` 去重。
 
-## 1.2 示例
+这意味着：
 
-```ts
-emit("event.login.success") → fact 存在
+- 同一个 `id` 重复 dispatch，不会重复写入历史
+- 不同 `id` 但相同 `key` 的信号，会被当作多次发生
 
-emit("event.logout") → 不影响已有 fact
-```
+这对 `count(...)`、`within(...)` 这类条件很重要。
 
-------
+## 3. Revert 的真实语义
 
-## 1.3 设计原因
+当前回溯不是“把步骤状态改回去”，而是：
 
-------
+1. 找到目标时间点
+2. 截断未来信号
+3. 重建状态
+4. 重建索引
+5. 重建 timer
 
-### 避免系统复杂化
+因此当前正确理解应该是：
 
-如果允许 Fact 自动失效：
+> Revert 是 time-slice rebuild，不是 mutable state patch。
 
-- 需要引入生命周期管理
-- 需要引入依赖关系（login → logout）
-- 需要引入状态一致性问题
+## 4. 历史事件为什么不会污染当前步骤
 
-直接变成“业务状态机” 
+当前实现有两层防线：
 
-------
+### 4.1 时间切片
 
-### 保持 SDK 纯粹性
+回溯到某个时间点时，未来信号会被截断，不再进入重建后的历史。
 
-> SDK 不理解 Fact 之间的关系
+### 4.2 激活时间切口
 
-------
+即使某个 key 在更早之前出现过，步骤求值也会基于：
 
-## 1.4 未来扩展（明确但不实现）
+- 当前 step 的 `activatedAt`
+- 或 `afterStep` 指向的时间锚点
 
-------
+来决定哪些历史信号对当前步骤仍然有效。
 
-### 可选 API（v2）
+## 5. `cancelWhen` 与 `when` 同时成立怎么办
 
-```ts
-FlowPilot.removeFact("event.login.success")
-```
+当前实现中，`cancelWhen` 优先于 `when`。
 
-------
+也就是说，如果同一轮求值里两者都为真：
 
-### v1 明确禁止：
+- 步骤会进入 `cancelled`
+- 不会被标记为 `completed`
 
-- ❌ 自动失效
-- ❌ 条件失效
-- ❌ 依赖关系清理
+这属于当前运行时的重要边界条件。
 
-------
+## 6. `enterWhen` + persistence 的恢复语义
 
-## 1.5 一句话总结
+当前持久化恢复不是把完整历史信号重放回来，而是恢复已完成步骤 baseline。
 
-> Fact 是“已发生的事实”，不是“当前状态”
+这意味着：
 
-------
+- 恢复后，某些后继步骤可能重新出现在 `pending`
+- 仍然要等待新的 `enterWhen` 成立，才会真正进入 `active`
 
-------
+这正是最近组合测试重点兜住的路径之一。
 
-## 2. Revert 后 Event 处理（确认设计正确性）
+## 7. timer 在 revert / replay 后如何处理
 
-------
+当前系统会在以下场景重建 timer：
 
-### 结论
+- Runtime 启动
+- Revert 后
+- Replay / DevTools 重建 shadow engine 后
 
-> Event Store 不需要清理（必须保留）
+只有仍然处于当前有效时间线、且仍在 `active` 的步骤，相关 timer 才会继续生效。
 
-------
+## 8. 流程完成与 finished 标记
 
-## 2.1 核心机制
+当前 Runtime 的完成条件不是“某个终点步骤完成”，而是：
 
-依赖 Runtime 规则：
+- `activeSteps` 为空
+- `pendingSteps` 为空
+- `completedSteps` 非空
 
-```ts
-signal.mode === "event"
-AND signal.timestamp > step.activatedAt
-```
-
-------
-
-## 2.2 Revert 行为
+一旦完成，若开启持久化，会额外写入：
 
 ```ts
-FlowPilot.control({
-  type: "REVERT",
-  toStep: "step2"
-});
+${persistence.key}_finished = "true"
 ```
 
-------
+## 9. 当前持久化边界
 
-### 执行结果：
+当前只持久化：
 
-```ts
-step2.activatedAt = now
-```
+- `completedStepIds`
+- `finished flag`
 
-------
+当前不会持久化：
 
-## 2.3 匹配结果
+- 原始 Signal 历史
+- `eventIndex`
+- `factMap`
+- trace
 
-------
+因此跨页面恢复更像“基于已完成步骤恢复流程位置”，而不是“完整恢复调试现场”。
 
-### 旧 Event：
+## 10. 当前性能边界
 
-```ts
-event.timestamp < activatedAt
-→ 自动失效
-```
+当前实现已经用索引避免了纯 O(n) 的全量扫描，但仍有几个边界：
 
-------
+- 原始历史仍会增长
+- 回溯和 replay 仍以重建为主
+- 没有 signal GC
+- 超大历史下仍需后续增量优化
 
-### 新 Event：
+## 11. 当前一句话结论
 
-```ts
-event.timestamp > activatedAt
-→ 可匹配
-```
-
-------
-
-## 2.4 设计优势
-
-------
-
-### 无需清理 Store
-
-- 避免复杂清理逻辑
-- 避免误删数据
-- 保持事件完整性（可调试）
-
-------
-
-### 天然幂等
-
-- 重复事件不会触发
-- 历史行为不会污染当前 Step
-
-------
-
-### 支持回放（Replay）
-
-- 可以用于调试 / 分析
-- 可以复现用户路径
-
-------
-
-## 2.5 风险边界（必须说明）
-
-------
-
-### Store 可能增长
-
-```ts
-events: Signal[]
-```
-
-------
-
-### v1 处理方式：
-
-- 不做裁剪（简化实现）
-
-------
-
-### v2 可选优化：
-
-```ts
-events = events.slice(-N)
-```
-
-或：
-
-```ts
-只保留最近 X 秒
-```
-
-------
-
-## 2.6 一句话总结
-
-> Event 用时间隔离，不用数据删除
-
-------
-
-------
-
-## 3. 最终一致性模型（关键总结）
-
-------
-
-## FlowPilot v1 的真实一致性策略：
-
-------
-
-### Event：
-
-```text
-时间一致性（Temporal Consistency）
-```
-
-------
-
-### Fact：
-
-```text
-状态一致性（State Consistency）
-```
-
-------
-
-## 合并后：
-
-```text
-Event（时间流） + Fact（状态集）
-→ 驱动 Step 状态机
-```
-
-------
-
-------
-
-## 4. v1 强约束总结（补充）
-
-------
-
-### 1. Fact 永不失效（Flow 生命周期内）
-
-------
-
-### 1. Event 永不删除（依赖时间过滤）
-
-------
-
-### 3. Revert 只更新时间，不清数据
-
-------
-
-### 4. SDK 不维护业务状态
-
-------
-
-## 5. 一句话总结（可以写在文档首页）
-
-> FlowPilot 使用「时间隔离 Event + 持久 Fact」来实现无副作用的状态机推进
+> FlowPilot 当前依赖“append-only signal history + derived indexes + time-slice rebuild”来保证步骤推进的可解释性与一致性。

@@ -1,7 +1,29 @@
 {
   "name": "flowpilot",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "description": "A composable product guide SDK for multi-step onboarding flows, runtime orchestration, and visual walkthroughs.",
+  "keywords": [
+    "guide",
+    "onboarding",
+    "product-tour",
+    "workflow",
+    "sdk",
+    "vue"
+  ],
+  "homepage": "https://github.com/zhdongjie/FlowPilot#readme",
+  "bugs": {
+    "url": "https://github.com/zhdongjie/FlowPilot/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhdongjie/FlowPilot.git"
+  },
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18"
+  },
+  "sideEffects": false,
   "type": "module",
   "main": "./dist/flowpilot.umd.js",
   "module": "./dist/flowpilot.esm.js",
@@ -22,7 +44,8 @@
     "build": "node ./scripts/build-sdk.mjs",
     "build:min": "node ./scripts/build-sdk.mjs --minify",
     "build:all": "node ./scripts/build-sdk.mjs && node ./scripts/build-sdk.mjs --minify",
-    "test": "vitest"
+    "test": "vitest --config vitest.config.mjs",
+    "test:run": "vitest --config vitest.config.mjs --run"
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
