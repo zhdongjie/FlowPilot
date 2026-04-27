@@ -46,7 +46,7 @@ export class TimelineViewer {
         // 🌟🌟🌟 核心过滤与清洗逻辑 🌟🌟🌟
         const displayEvents = allEvents.filter(event => {
             // 1. 过滤掉引擎内部瞬间结算产生的噪音
-            if (event.type === 'FACT_APPLIED' || event.type === 'STEP_ADVANCE') {
+            if (event.type === 'FACT_APPLIED' || event.type === 'STEP_COMPLETE') {
                 return false;
             }
             return true;
@@ -58,10 +58,11 @@ export class TimelineViewer {
             const card = document.createElement("div");
             card.className = "fp-event-card";
             this.styleEventCard(card, event);
+            const eventKey = event.meta?.key;
 
             // 🌟 判断是否是高频的、无需回溯的“噪音输入”
             const isNoiseSignal = event.type === 'SIGNAL_INGEST' &&
-                (event.key?.startsWith('focus_') || event.key?.startsWith('blur_') || event.key?.startsWith('input_'));
+                (eventKey?.startsWith('focus_') || eventKey?.startsWith('blur_') || eventKey?.startsWith('input_'));
 
             if (isNoiseSignal) {
                 // 如果是焦点事件，让它变灰，且不显示回溯按钮
@@ -71,7 +72,7 @@ export class TimelineViewer {
                     <div style="font-size: 10px; color: #666;">${new Date(event.timestamp).toLocaleTimeString()}</div>
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
                         <span style="font-size: 12px; color: #888;">
-                            <i>${event.key}</i>
+                            <i>${eventKey}</i>
                         </span>
                     </div>
                 `;
@@ -85,7 +86,7 @@ export class TimelineViewer {
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
                         <span style="font-size: 12px;">
                             <b style="color: ${titleColor};">${event.type}</b> 
-                            <i style="color: #ccc; margin-left: 6px;">${event.key || event.stepId || ''}</i>
+                            <i style="color: #ccc; margin-left: 6px;">${eventKey || event.stepId || ''}</i>
                         </span>
                         <button class="fp-rewind-btn" style="
                             background: #007aff; 
@@ -109,8 +110,14 @@ export class TimelineViewer {
             }
 
             // 保持 DAG 高亮联动
-            card.onmouseenter = () => this.devtools.setHoveredEventKey(event.key || null);
-            card.onmouseleave = () => this.devtools.setHoveredEventKey(null);
+            card.onmouseenter = () => {
+                this.devtools.setHoveredEventKey(eventKey || null);
+                this.devtools.setHoveredHistoryStepId(event.stepId || null);
+            }
+            card.onmouseleave = () => {
+                this.devtools.setHoveredEventKey(null);
+                this.devtools.setHoveredHistoryStepId(null);
+            }
 
             this.listRoot.appendChild(card);
         });

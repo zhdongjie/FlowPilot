@@ -17,7 +17,7 @@ export class FlowRuntime {
     private readonly pluginManager = new PluginManager();
 
     constructor(options: { steps: Step[], rootStepId: string, config: FlowConfig, plugins?: FlowPlugin[] }) {
-        this.engine = new FlowEngine(options.steps, options.rootStepId);
+        this.engine = new FlowEngine(options.steps, options.rootStepId, { mode: "runtime"});
         this.config = options.config;
 
         // 1.初始化插件上下文
@@ -55,6 +55,7 @@ export class FlowRuntime {
                 activeSteps: this.engine.getActiveSteps(),
                 completedSteps: this.engine.getCompletedSteps(),
                 isFinished: this.engine.getActiveSteps().length === 0 &&
+                    this.engine.getPendingSteps().length === 0 &&
                     this.engine.getCompletedSteps().length > 0
             }),
             now: () => Date.now(),
@@ -171,7 +172,7 @@ export class FlowRuntime {
         this.saveProgress();
 
         // 🌟 强制广播（保证 timeline 更新）
-        this.stateEmitter.emit();
+        // this.stateEmitter.emit();
     }
 
     // =========================
@@ -189,7 +190,12 @@ export class FlowRuntime {
         this.engine.revertToTime(targetTs);
 
         this.scheduleNext();
+
+        this.saveProgress();
+
         this.stateEmitter.emit();
+
+        this.pluginManager.emitHook("onRender");
     }
 
     public revertToStep(stepId: string) {

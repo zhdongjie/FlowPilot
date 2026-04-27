@@ -16,6 +16,7 @@ mock.onPost('/api/submit').reply(200, { code: 'submit_success' })
 function initFlowPilot() {
     return createFlowPilot({
         preset: PluginPresets.WEB_DEFAULT,
+        // preset: PluginPresets.TRACKING_ONLY,
 
         steps: onboardingSteps,
         rootStepId: "step_login",

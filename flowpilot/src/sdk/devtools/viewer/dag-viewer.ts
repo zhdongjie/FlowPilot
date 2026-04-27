@@ -9,13 +9,16 @@ export class DAGViewer {
     private readonly renderer = new DAGRenderCore();
     private animationId = 0;
 
+    // 🌟 新增：替换掉旧的 window.resize，完美解决初始化宽高为 0 的白屏问题
+    private resizeObserver!: ResizeObserver;
+
     private mouseX = -1;
     private mouseY = -1;
     private isRunning = false;
 
     // 🌟🌟 摄像机状态机 🌟🌟
-    private displayStepId: string | null = null; // 当前屏幕实际在画的步骤
-    private holdUntil: number = 0;               // 锁存时间戳
+    private displayStepId: string | null = null;
+    private holdUntil: number = 0;
 
     constructor(
         private readonly devtools: FlowDevTools,
@@ -25,10 +28,32 @@ export class DAGViewer {
     mount() {
         this.canvas = document.createElement("canvas");
         this.ctx = this.canvas.getContext("2d")!;
+
+        this.canvas.style.display = "block";
+
+        this.canvas.style.position = "absolute";
+        this.canvas.style.top = "50";
+        this.canvas.style.left = "0";
+
         this.container.appendChild(this.canvas);
 
-        this.resize();
-        window.addEventListener("resize", this.resize);
+        this.resizeObserver = new ResizeObserver((entries) => {
+            const entry = entries[0];
+            if (!entry) return;
+            const { width, height } = entry.contentRect;
+            if (width === 0 || height === 0) return;
+
+            const dpr = window.devicePixelRatio || 1;
+            this.canvas.width = width * dpr;
+            this.canvas.height = height * dpr;
+            this.canvas.style.width = `${width}px`;
+            this.canvas.style.height = `${height}px`;
+
+            // 重置变换矩阵并重新缩放，防止多次触发导致画面无限放大
+            this.ctx.resetTransform();
+            this.ctx.scale(dpr, dpr);
+        });
+        this.resizeObserver.observe(this.container);
 
         this.canvas.addEventListener("mousemove", this.onMouseMove);
         this.canvas.addEventListener("mouseleave", this.onMouseLeave);
@@ -40,18 +65,10 @@ export class DAGViewer {
     unmount() {
         this.isRunning = false;
         cancelAnimationFrame(this.animationId);
-        window.removeEventListener("resize", this.resize);
+        this.resizeObserver?.disconnect(); // 🌟 清理 Observer
+        this.canvas.removeEventListener("mousemove", this.onMouseMove);
+        this.canvas.removeEventListener("mouseleave", this.onMouseLeave);
     }
-
-    private readonly resize = () => {
-        const rect = this.container.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        this.canvas.width = rect.width * dpr;
-        this.canvas.height = rect.height * dpr;
-        this.canvas.style.width = `${rect.width}px`;
-        this.canvas.style.height = `${rect.height}px`;
-        this.ctx.scale(dpr, dpr);
-    };
 
     private readonly onMouseMove = (e: MouseEvent) => {
         const rect = this.canvas.getBoundingClientRect();
@@ -67,66 +84,77 @@ export class DAGViewer {
     private readonly loop = () => {
         if (!this.isRunning) return;
         const now = performance.now();
+        const rect = this.container.getBoundingClientRect();
 
-        // 1. 获取引擎当下的“真实”状态
+        // 🌟🌟 1. 优先级最高：时光机视角 (Time Machine Hover)
+        // 从 Controller 获取用户鼠标当前正悬停在时间线上的哪个历史 StepId
+        const timeMachineStepId = this.devtools.getHoveredHistoryStepId();
+
+        // 🌟🌟 2. 真实物理视角
         const diagnostics = this.devtools.getActiveDiagnostics();
         const realActiveId = diagnostics[0]?.stepId || null;
 
-        // 智能运镜与通关锁存
-        if (realActiveId !== this.displayStepId) {
-            if (this.displayStepId && this.holdUntil === 0) {
-                // 如果发生了切换，获取上一个画面的最终状态
-                const oldDiag = this.devtools.getDiagnostic(this.displayStepId);
+        let targetRenderStepId: string | null = null;
 
-                // 如果旧画面是“通关（passed: true）”的状态，说明是正常前进
-                if (oldDiag?.tree?.passed) {
-                    // 强行把旧画面锁存在屏幕上 1000 毫秒，让用户欣赏绿光扩散动画！
-                    this.holdUntil = now + 1000;
-                } else {
-                    // 如果旧画面没通关就被切了（说明用户点击了“⏪回放”或重置），立刻切镜头
+        // 如果用户在看时光机，直接强行切镜头，忽略所有动画锁存！
+        if (timeMachineStepId) {
+            targetRenderStepId = timeMachineStepId;
+            this.displayStepId = timeMachineStepId; // 顺便同步摄像机
+            this.holdUntil = 0;                     // 打断之前的通关动画锁
+        } else {
+            // 否则，走你原有的精妙“摄像机状态机”逻辑
+            if (realActiveId !== this.displayStepId) {
+                if (this.displayStepId && this.holdUntil === 0) {
+                    const state = this.devtools.getDebugEngine()?.inspect();
+                    const isCompleted = state?.completedSteps.includes(this.displayStepId);
+                    if (isCompleted) {
+                        // 如果它在完成名单里，强制锁存屏幕 1000ms 播放通关特效！
+                        this.holdUntil = now + 1000;
+                    } else {
+                        // 否则（比如用户主动重置/回退），立刻切镜头
+                        this.displayStepId = realActiveId;
+                    }
+                } else if (!this.displayStepId) {
                     this.displayStepId = realActiveId;
                 }
-            } else if (!this.displayStepId) {
-                // 初次加载，直接赋值
-                this.displayStepId = realActiveId;
             }
+
+            if (this.holdUntil > 0 && now >= this.holdUntil) {
+                this.displayStepId = realActiveId;
+                this.holdUntil = 0;
+            }
+
+            targetRenderStepId = this.displayStepId;
         }
 
-        // 检查 1000ms 的锁存期是否结束，结束了就切到新步骤
-        if (this.holdUntil > 0 && now >= this.holdUntil) {
-            this.displayStepId = realActiveId;
-            this.holdUntil = 0;
-        }
-
-        // 2. 决定当前到底要画哪棵树
-        const targetDiag = this.displayStepId
-            ? this.devtools.getDiagnostic(this.displayStepId)
+        // 🌟🌟 3. 开始执行渲染
+        const targetDiag = targetRenderStepId
+            ? this.devtools.getDiagnostic(targetRenderStepId)
             : null;
 
-        if (targetDiag && targetDiag.tree) {
-            const graph = buildGraph(targetDiag.tree, targetDiag.stepId);
-            const rect = this.container.getBoundingClientRect();
+        // 如果画板尺寸有效才绘制
+        if (rect.width > 0 && rect.height > 0) {
+            this.ctx.clearRect(0, 0, rect.width, rect.height); // 每帧必须清空！
 
-            const hovered = this.renderer.draw(this.ctx, graph, {
-                width: rect.width,
-                height: rect.height,
-                now: now,
-                activeEventKey: this.devtools.getHoveredEventKey(),
-                mouseX: this.mouseX,
-                mouseY: this.mouseY
-            });
-
-            this.canvas.style.cursor = hovered ? 'help' : 'default';
-        } else {
-            const rect = this.container.getBoundingClientRect();
-
-            if (this.devtools.isFlowFinished()) {
+            if (targetDiag && targetDiag.tree) {
+                const graph = buildGraph(targetDiag.tree, targetDiag.stepId);
+                const hovered = this.renderer.draw(this.ctx, graph, {
+                    width: rect.width,
+                    height: rect.height,
+                    now: now,
+                    activeEventKey: this.devtools.getHoveredEventKey(),
+                    mouseX: this.mouseX,
+                    mouseY: this.mouseY
+                });
+                this.canvas.style.cursor = hovered ? 'help' : 'default';
+            } else if (!timeMachineStepId && this.devtools.isFlowFinished()) {
+                // 只有在没看时光机，且真实世界已结束时，才画完成画面
                 const finishedGraph: any = {
                     rootId: "flow_finished",
                     nodes: [{
                         id: "flow_finished",
                         label: "🎉 所有流程执行完毕",
-                        type: "step", // 借用 step 的圆角矩形外观
+                        type: "step",
                         passed: true,
                         reason: "ALL_DONE"
                     }],
@@ -143,7 +171,6 @@ export class DAGViewer {
                 });
                 this.canvas.style.cursor = hovered ? 'help' : 'default';
             } else {
-                this.ctx.clearRect(0, 0, rect.width, rect.height);
                 this.canvas.style.cursor = 'default';
             }
         }

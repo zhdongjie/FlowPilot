@@ -19,31 +19,39 @@ export class FlowReplayer {
         signals: Signal[],
         rootStepId: string
     ): ReplayResult {
-        const engine = new FlowEngine(structuredClone(steps), rootStepId);
-        const trace = new TraceStore();
+        const engine = new FlowEngine(structuredClone(steps), rootStepId, { mode: "replay"});
+        const traceScope = engine.getTrace();
 
         const sorted = [...signals].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
 
-        trace.record({ type: "RECOMPUTE_START", timestamp: Date.now() });
+        traceScope.record({
+            type: "REPLAY_START",
+            timestamp: Date.now()
+        });
 
         for (const signal of sorted) {
-            trace.record({
+            traceScope.record({
                 type: "SIGNAL_INGEST",
                 timestamp: signal.timestamp,
                 signalId: signal.id,
-                key: signal.key,
-                // 👉 适配：记录当前所有的活跃步骤 ID
-                activeSteps: engine.getActiveSteps()
+                meta: {
+                    key: signal.key,
+                    // 👉 适配：记录当前所有的活跃步骤 ID
+                    activeSteps: engine.getActiveSteps()
+                }
             });
 
             engine.ingest(signal);
         }
 
-        trace.record({ type: "RECOMPUTE_END", timestamp: Date.now() });
+        traceScope.record({
+            type: "REPLAY_END",
+            timestamp: Date.now()
+        });
 
         return {
-            engine,
-            trace,
+            engine: engine,
+            trace: traceScope.raw(),
             state: {
                 activeSteps: engine.getActiveSteps(),
                 completedSteps: engine.getCompletedSteps()

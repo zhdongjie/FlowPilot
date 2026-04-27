@@ -1,7 +1,7 @@
 // src/sdk/core/engine.ts
 
 import { SignalStore } from "./store";
-import { TraceStore } from "../runtime/trace";
+import { TraceService, TraceScope, TraceMode } from "../runtime/trace";
 import type {
     Condition,
     DiagnosticNode,
@@ -15,6 +15,9 @@ import type {
 import { FlowParser } from "../compiler/parser";
 import { ConditionCompiler } from "../compiler/condition";
 import { TimerScheduler } from "../runtime/scheduler";
+import { FlowState } from "./flow-state.ts";
+import { FlowExecutor } from "./flow-executor.ts";
+import { StatePatch } from "./flow-executor.types.ts";
 
 export interface IndexedEvent {
     ts: number;
@@ -22,33 +25,38 @@ export interface IndexedEvent {
 }
 
 export class FlowEngine {
+    private readonly mode : TraceMode;
     private readonly store = new SignalStore();
-    private readonly trace = new TraceStore();
+    private readonly trace: TraceScope;
     private readonly stepsMap: Map<string, ParsedStep> = new Map();
 
     // O(1) 的全局事实索引
     private readonly factMap = new Map<string, number>();
 
-    // 👉 Phase 1: 记录每个步骤的激活时间，支撑 Temporal 逻辑
-    private readonly activatedAt = new Map<string, number>();
-    private readonly completedAt = new Map<string, number>();
-
     private readonly eventIndex = new Map<string, IndexedEvent[]>();
 
-    private readonly pendingSteps = new Set<string>();   // 等待 enterWhen 满足
-    private readonly activeSteps = new Set<string>();    // 活跃中，等待 when 满足
-    private readonly completedSteps = new Set<string>(); // 成功完成
-    private readonly cancelledSteps = new Set<string>(); // 被 cancelWhen 终止
+    public state: FlowState;
 
     private readonly rootStepId: string;
 
-    private readonly evalCtx: EvalContext;
     private readonly scheduler = new TimerScheduler();
 
     private heartbeatTimer: any = null;
-    public onStateChange?: () => void; // 📢 外部 UI 监听大喇叭
+    public onStateChange?: () => void;
+    private readonly executor: FlowExecutor;
 
-    constructor(steps: Step[], rootStepId: string) {
+    constructor(
+        steps: Step[],
+        rootStepId: string,
+        options?: {
+            trace?: TraceScope;
+            mode?: TraceMode;
+        }
+    ) {
+        this.mode = options?.mode ?? "runtime";
+        this.trace = options?.trace ?? TraceService.createScope(this.mode);
+        this.state = new FlowState();
+
         steps.forEach(rawStep => {
             // 1. 解析阶段：DSL 字符串 -> AST
             const step = this.preprocessStep(rawStep);
@@ -72,18 +80,19 @@ export class FlowEngine {
         this.trace.record({
             type: "ENGINE_INIT",
             timestamp: 0,
-            meta: {stepsCount: steps.length, rootStepId}
+            meta: {
+                stepsCount: steps.length,
+                rootStepId
+            }
         });
 
-        this.evalCtx = {
-            factMap: this.factMap,
-            eventIndex: this.eventIndex,
-            activatedAt: this.activatedAt,
-            completedSteps: this.completedSteps,
-            currentStepId: "",
-            currentEventTs: 0,
-            lowerBound: this.lowerBound.bind(this)
-        };
+        this.executor = new FlowExecutor({
+            state: this.state,
+            stepsMap: this.stepsMap,
+            trace: this.trace,
+            scheduler: this.scheduler,
+            createContext: this.createContext.bind(this)
+        });
 
         this.resetState();
         this.startHeartbeat();
@@ -104,15 +113,6 @@ export class FlowEngine {
             processed.cancelWhen = FlowParser.parse(processed.cancelWhen);
         }
         return processed as ParsedStep;
-    }
-
-    /**
-     * 每次判定时，动态生成传递给闭包的只读上下文
-     */
-    private buildContext(stepId: string, currentEventTs: number): EvalContext {
-        this.evalCtx.currentStepId = stepId;
-        this.evalCtx.currentEventTs = currentEventTs;
-        return this.evalCtx;
     }
 
     /**
@@ -144,71 +144,26 @@ export class FlowEngine {
         dfs(this.rootStepId);
     }
 
-    private resetState() {
-        this.pendingSteps.clear();
-        this.activeSteps.clear();
-        this.completedSteps.clear();
-        this.cancelledSteps.clear();
+    private resetState(initialTs: number = 0) {
+        this.state.pendingSteps.clear();
+        this.state.activeSteps.clear();
+        this.state.completedSteps.clear();
+        this.state.cancelledSteps.clear();
+        this.state.activatedAt.clear();
+        this.state.completedAt.clear();
+
         this.factMap.clear();
-        this.activatedAt.clear();
-        this.completedAt.clear();
         this.eventIndex.clear();
         this.scheduler.clear();
 
         if (this.rootStepId) {
             // 1. 起点节点先进入 pending 状态
-            this.pendingSteps.add(this.rootStepId);
+            this.state.pendingSteps.add(this.rootStepId);
 
             // 2. 赋予基准时间 0，强制引擎做一次空转 (脉冲)
             // 这样，只要 root 节点没有 enterWhen 拦截，它就会瞬间从 pending 跃迁到 active
-            this.evaluateLoop(0);
+            this.evaluateLoop(initialTs);
         }
-    }
-
-    private registerTimersForStep(stepId: string, activatedAt: number) {
-        const step = this.stepsMap.get(stepId);
-        if (!step) return;
-
-        // 递归采集 Condition 中的 within
-        const collect = (cond?: Condition) => {
-            if (!cond) return;
-            switch (cond.type) {
-                case "event":
-                    if (cond.within) {
-                        this.scheduler.push({ ts: activatedAt + cond.within, stepId, type: "timeout" });
-                    }
-                    break;
-                case "sequence":
-                    if (cond.within) {
-                        this.scheduler.push({ ts: activatedAt + cond.within, stepId, type: "timeout" });
-                    }
-                    break;
-                case "not":
-                    collect(cond.condition);
-                    break;
-                case "and":
-                case "or":
-                    cond.conditions.forEach(collect);
-                    break;
-            }
-        };
-
-        collect(step.when);
-        collect(step.cancelWhen);
-        if (step.enterWhen) collect(step.enterWhen);
-    }
-
-    private activateStep(stepId: string, timestamp: number) {
-        this.activeSteps.add(stepId);
-        this.activatedAt.set(stepId, timestamp);
-        // 👉 关键点：注册该步骤关联的所有时间约束
-        this.registerTimersForStep(stepId, timestamp);
-        this.trace.record({
-            type: "STEP_ACTIVATE",
-            timestamp,
-            stepId,
-            activeSteps: [...this.activeSteps]
-        });
     }
 
     // -------------------------
@@ -216,12 +171,13 @@ export class FlowEngine {
     // -------------------------
     inspect() {
         return {
-            activeSteps: [...this.activeSteps],
-            completedSteps: [...this.completedSteps],
+            activeSteps: [...this.state.activeSteps],
+            pendingSteps: [...this.state.pendingSteps],
+            completedSteps: [...this.state.completedSteps],
             factMap: Object.fromEntries(this.factMap),
-            activatedAt: Object.fromEntries(this.activatedAt),
+            activatedAt: Object.fromEntries(this.state.activatedAt),
             eventCount: this.store.getEvents().length,
-            trace: this.trace.all()
+            trace: this.trace.raw().all()
         };
     }
 
@@ -230,11 +186,15 @@ export class FlowEngine {
     }
 
     getActiveSteps() {
-        return [...this.activeSteps];
+        return [...this.state.activeSteps];
     }
 
     getCompletedSteps() {
-        return [...this.completedSteps];
+        return [...this.state.completedSteps];
+    }
+
+    getPendingSteps() {
+        return [...this.state.pendingSteps];
     }
 
     // 供 Runtime 使用的 API
@@ -254,8 +214,10 @@ export class FlowEngine {
             type: "SIGNAL_INGEST",
             timestamp: signal.timestamp,
             signalId: signal.id,
-            key: signal.key,
-            activeSteps: [...this.activeSteps]
+            meta: {
+                key: signal.key,
+                activeSteps: [...this.state.activeSteps]
+            }
         });
 
         // 核心：若 store 拦截了重复信号，直接短路返回
@@ -284,8 +246,10 @@ export class FlowEngine {
         this.trace.record({
             type: "FACT_APPLIED",
             timestamp: signal.timestamp,
-            key: signal.key,
-            signalId: signal.id
+            signalId: signal.id,
+            meta: {
+                key: signal.key,
+            }
         });
     }
 
@@ -318,159 +282,69 @@ export class FlowEngine {
         list.splice(i + 1, 0, item);
     }
 
-    // -------------------------
-    // CORE LOOP (极简纯粹逻辑推演)
-    // -------------------------
-    // ✅ 修改后的 evaluateLoop：逻辑闭环，精准广播
     private evaluateLoop(currentEventTs: number) {
         this.startHeartbeat();
 
         let changed = true;
-        let guard = 0;
-        const MAX_LOOP = 1000;
-        let didStateChange = false; // 记录本次是否有状态跃迁
+        let didStateChange = false;
+        let guard = 0;             // 👉 加回防暴毙护卫
+        const MAX_LOOP = 1000;     // 👉 加回防暴毙护卫
 
         while (changed) {
             if (++guard > MAX_LOOP) {
-                throw new Error("[FlowPilot Engine] Critical: Infinite loop detected.");
+                throw new Error("[FlowPilot Engine] Critical: Infinite loop detected during state patch.");
             }
+            changed = false;
 
-            const pendingChanged = this.processPendingSteps(currentEventTs);
-            const activeChanged = this.processActiveSteps(currentEventTs);
+            // =========================
+            // 1. flush timers（只消费，不改 state）
+            // =========================
+            this.flushTimers(currentEventTs);
 
-            changed = pendingChanged || activeChanged;
+            // =========================
+            // 2. executor 产出 patch
+            // =========================
+            const pendingPatch = this.executor.processPendingSteps(
+                this.state,
+                currentEventTs
+            );
 
-            if (changed) didStateChange = true;
+            const activePatch = this.executor.processActiveSteps(
+                this.state,
+                currentEventTs
+            );
+
+            // =========================
+            // 3. merge patch
+            // =========================
+            const patch = this.mergePatch(pendingPatch, activePatch);
+
+            // =========================
+            // 4. 判断是否需要 apply
+            // =========================
+            if (this.hasPatchEffect(patch)) {
+                this.applyPatch(patch, currentEventTs);
+                changed = true;
+                didStateChange = true;
+            }
         }
 
-        // 🌟 核心收尾逻辑：如果所有的 step 都执行完了
-        if (this.activeSteps.size === 0 && this.pendingSteps.size === 0) {
-            // 1. 记录“流程结束”的专属事实
+        // =========================
+        // 5. completion check
+        // =========================
+        if (this.isFlowCompleted()) {
             this.trace.record({
-                type: "FACT_APPLIED" as any, // 或者你定义一个 "FLOW_COMPLETED"
-                timestamp: currentEventTs,
-                key: "flow_completed",
-                meta: { message: "All steps finished naturally." }
+                type: "REPLAY_END",
+                timestamp: currentEventTs
             });
 
-            // 2. 触发一次终极状态更新广播
-            if (this.onStateChange) {
-                this.onStateChange();
-            }
-
-            // 3. 停止心跳，功成身退
+            this.onStateChange?.();
             this.stop();
-            return; // 提前退出，不再走下面的常规广播
+            return;
         }
 
-        // 💡 常规广播（针对没走完流程时的状态跃迁）
-        if (didStateChange && this.onStateChange) {
-            this.onStateChange();
-        }
-    }
-
-    // 🟢 阶段 1：处理 Pending -> Active 的跃迁
-    private processPendingSteps(currentEventTs: number): boolean {
-        let changed = false;
-        for (const stepId of this.pendingSteps) {
-            const step = this.stepsMap.get(stepId);
-            if (!step) continue;
-
-            const ctx = this.buildContext(stepId, currentEventTs);
-            // 👉 O(1) 闭包调用！
-            if (!step.compiledEnterWhen || step.compiledEnterWhen(ctx)) {
-                this.pendingSteps.delete(stepId);
-                this.activateStep(stepId, currentEventTs);
-                changed = true;
-            }
-        }
-        return changed;
-    }
-
-    // 🔵 阶段 2：处理 Active -> Cancelled / Completed 的跃迁
-    private processActiveSteps(currentEventTs: number): boolean {
-        let changed = false;
-        for (const stepId of this.activeSteps) {
-            const step = this.stepsMap.get(stepId);
-            if (!step) continue;
-
-            // 优先判定是否被取消
-            if (this.tryCancelStep(step, stepId, currentEventTs)) {
-                changed = true;
-                continue;
-            }
-
-            // 判定是否完成
-            if (this.tryCompleteStep(step, stepId, currentEventTs)) {
-                changed = true;
-            }
-        }
-        return changed;
-    }
-
-    // ☠️ 死亡判定
-    private tryCancelStep(step: ParsedStep, stepId: string, currentEventTs: number): boolean {
-        const ctx = this.buildContext(stepId, currentEventTs);
-        // 👉 O(1) 闭包调用！
-        if (!step.compiledCancelWhen?.(ctx)) {
-            return false;
-        }
-
-        this.activeSteps.delete(stepId);
-        this.cancelledSteps.add(stepId);
-
-        this.trace.record({
-            type: "STEP_ADVANCE" as any,
-            timestamp: currentEventTs,
-            stepId,
-            meta: {reason: "CANCELLED_BY_CONDITION"}
-        });
-
-        return true;
-    }
-
-    // ✅ 完成判定
-    // ✅ 修改后的 tryCompleteStep：同步执行，干净利落
-    private tryCompleteStep(step: ParsedStep, stepId: string, currentEventTs: number): boolean {
-        const ctx = this.buildContext(stepId, currentEventTs);
-        if (!step.compiledWhen?.(ctx)) {
-            return false;
-        }
-
-        // 记录日志
-        this.trace.record({
-            type: "STEP_ADVANCE",
-            timestamp: currentEventTs,
-            stepId,
-            toStep: step.next?.join(','),
-            meta: { conditionType: step.when.type }
-        });
-
-        // 🌟 1. 同步变更状态
-        this.completedSteps.add(stepId);
-        this.activeSteps.delete(stepId);
-        this.completedAt.set(stepId, currentEventTs);
-
-        // 🌟 2. 立即激活下一步（不再需要 setTimeout！）
-        this.activateNextSteps(step.next);
-
-        return true;
-    }
-
-    // 🚀 拓扑扩散
-    private activateNextSteps(nextIds?: string[]) {
-        if (!nextIds) return;
-
-        for (const nextId of nextIds) {
-            const isUntouched =
-                !this.completedSteps.has(nextId) &&
-                !this.activeSteps.has(nextId) &&
-                !this.pendingSteps.has(nextId) &&
-                !this.cancelledSteps.has(nextId);
-
-            if (isUntouched) {
-                this.pendingSteps.add(nextId);
-            }
+        if (didStateChange) {
+            this.onStateChange?.();
         }
     }
 
@@ -484,6 +358,24 @@ export class FlowEngine {
             else r = mid;
         }
         return l;
+    }
+
+    private hasPatchEffect(patch: StatePatch): boolean {
+        return (
+            patch.pending.length > 0 ||
+            patch.activate.length > 0 ||
+            patch.complete.length > 0 ||
+            patch.cancel.length > 0 ||
+            patch.timers.length > 0 ||
+            patch.traces.length > 0
+        );
+    }
+
+    private isFlowCompleted(): boolean {
+        return (
+            this.state.activeSteps.size === 0 &&
+            this.state.pendingSteps.size === 0
+        );
     }
 
     /**
@@ -504,7 +396,7 @@ export class FlowEngine {
 
             // 👉 V2 新增：After 时间锚点诊断
             case "after": {
-                const passed = this.completedSteps.has(cond.stepId);
+                const passed = this.state.completedSteps.has(cond.stepId);
                 return {
                     type: "after",
                     passed,
@@ -554,7 +446,7 @@ export class FlowEngine {
 
     private traceEvent(cond: EventCondition, currentStepId: string): DiagnosticNode {
         const referenceStepId = cond.afterStep || currentStepId;
-        const cutoff = this.activatedAt.get(referenceStepId) ?? 0;
+        const cutoff = this.state.activatedAt.get(referenceStepId) ?? 0;
         const list = this.eventIndex.get(cond.key) || [];
         const start = this.lowerBound(list, cutoff);
         const availableEvents = list.slice(start);
@@ -610,7 +502,7 @@ export class FlowEngine {
 
     private traceSequence(cond: SequenceCondition, currentStepId: string): DiagnosticNode {
         const referenceStepId = cond.afterStep || currentStepId;
-        const cutoff = this.activatedAt.get(referenceStepId) ?? 0;
+        const cutoff = this.state.activatedAt.get(referenceStepId) ?? 0;
         let currentTs = cutoff;
         let lastTs = cutoff;
         let failedAtKey: string | null = null;
@@ -662,11 +554,21 @@ export class FlowEngine {
     recompute() {
         const events = [...this.store.getEvents()];
         this.store.clear();
+        this.trace.record({
+            type: "REPLAY_START",
+            timestamp: Date.now()
+        });
         this.replay(events);
+        this.trace.record({
+            type: "REPLAY_END",
+            timestamp: Date.now()
+        });
     }
 
     private replay(events: Signal[]) {
-        this.resetState();
+        const originalCallback = this.onStateChange;
+        this.onStateChange = undefined;
+        this.resetState(0);
         const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
         for (const e of sorted) {
             // 纯净状态下手动推进，不触发无用副作用
@@ -674,6 +576,9 @@ export class FlowEngine {
             this.updateFact(e);
             this.evaluateLoop(e.timestamp ?? 0);
         }
+        // 历史重放完毕：恢复广播，并强制做最后一次对齐到真实世界的时间
+        this.onStateChange = originalCallback;
+        this.evaluateLoop(Date.now());
     }
 
     /**
@@ -686,7 +591,7 @@ export class FlowEngine {
         const validEvents = events.filter(e => e.timestamp <= targetTs);
 
         // 2. 🌟 挥刀斩断时间线：删掉未来的日志
-        this.trace.truncate(targetTs);
+        this.trace.raw().truncate(targetTs);
 
         // 3. 🌟 刻上时光穿梭的烙印
         this.trace.record({
@@ -697,13 +602,13 @@ export class FlowEngine {
 
         // 4. 🌟 底层状态机静默读档！(必须静音，否则 replay 会产生海量重复日志)
         this.store.clear();
-        this.trace.mute();   // 开启静音
+        this.trace.raw().mute();   // 开启静音
         this.replay(validEvents);
-        this.trace.unmute(); // 读档完毕，解除静音
+        this.trace.raw().unmute(); // 读档完毕，解除静音
     }
 
     revert(targetStepId: string) {
-        const targetTs = this.completedAt.get(targetStepId);
+        const targetTs = this.state.completedAt.get(targetStepId);
 
         if (targetTs === undefined) {
             throw new Error(`[FlowPilot Engine] Cannot revert. Step '${targetStepId}' is not in the current timeline history.`);
@@ -719,24 +624,36 @@ export class FlowEngine {
 
         if (step) {
             // 2. 标记为已完成
-            this.completedSteps.add(stepId);
+            this.state.completedSteps.add(stepId);
 
             // 3. 清理可能残留的旧状态
-            this.activeSteps.delete(stepId);
-            this.pendingSteps.delete(stepId);
+            this.state.activeSteps.delete(stepId);
+            this.state.pendingSteps.delete(stepId);
 
             // 4. 记录完成时间（恢复现场时的基准时间）
-            this.completedAt.set(stepId, Date.now());
+            this.state.completedAt.set(stepId, Date.now());
 
-            // 5. 激活它的后续节点，让引导能顺利接着往下跑
-            this.activateNextSteps(step.next);
+            // Resume from persistence should continue the flow, not collapse it.
+            for (const nextId of step.next ?? []) {
+                const isUntouched =
+                    !this.state.completedSteps.has(nextId) &&
+                    !this.state.activeSteps.has(nextId) &&
+                    !this.state.pendingSteps.has(nextId) &&
+                    !this.state.cancelledSteps.has(nextId);
+
+                if (isUntouched) {
+                    this.state.pendingSteps.add(nextId);
+                }
+            }
 
             this.trace.record({
-                type: "STEP_ADVANCE" as any,
+                type: "STEP_COMPLETE",
                 timestamp: Date.now(),
-                stepId,
-                toStep: step.next?.join(','),
-                meta: { reason: "FORCED_BY_PERSISTENCE" }
+                stepId: stepId,
+                meta: {
+                    toStep: step.next?.join(','),
+                    reason: "FORCED_BY_PERSISTENCE"
+                }
             });
         } else {
             console.warn(`[FlowPilot Engine] forceComplete failed: Step '${stepId}' not found.`);
@@ -744,7 +661,7 @@ export class FlowEngine {
     }
 
     public getTraceStore() {
-        return this.trace;
+        return this.trace.raw();
     }
 
     /** 👉 暴露当前引擎实例的原始配置 (供影子引擎克隆) */
@@ -769,13 +686,7 @@ export class FlowEngine {
         if (this.heartbeatTimer) return;
 
         this.heartbeatTimer = setInterval(() => {
-            // 1. 拨动内部时间齿轮，检查 timer 是否到期
             this.evaluateLoop(Date.now());
-
-            // 🌟 2. 终极暴力大喇叭：只要引擎还在工作，每半秒强刷一次 UI
-            if (this.onStateChange) {
-                this.onStateChange();
-            }
         }, 500);
     }
 
@@ -786,4 +697,97 @@ export class FlowEngine {
             this.heartbeatTimer = null;
         }
     }
+
+    hydrate(snapshot: {
+        activeSteps: string[];
+        completedSteps: string[];
+        pendingSteps: string[];
+    }) {
+        this.state.activeSteps = new Set(snapshot.activeSteps);
+        this.state.completedSteps = new Set(snapshot.completedSteps);
+        this.state.pendingSteps = new Set(snapshot.pendingSteps);
+    }
+
+    private mergePatch(a: StatePatch, b: StatePatch): StatePatch {
+        return {
+            pending: [...a.pending, ...b.pending],
+            activate: [...a.activate, ...b.activate],
+            complete: [...a.complete, ...b.complete],
+            cancel: [...a.cancel, ...b.cancel],
+            timers: [...a.timers, ...b.timers],
+            traces: [...a.traces, ...b.traces],
+        };
+    }
+
+    private applyPatch(patch: StatePatch, currentEventTs: number) {
+        for (const id of patch.pending || []) {
+            this.state.pendingSteps.add(id);
+        }
+        // activate
+        for (const id of patch.activate) {
+            this.state.pendingSteps.delete(id);
+
+            const alreadyActive =
+                this.state.activeSteps.has(id) ||
+                this.state.completedSteps.has(id);
+
+            if (alreadyActive) continue;
+
+            this.state.activeSteps.add(id);
+            this.state.activatedAt.set(id, currentEventTs);
+        }
+
+        // complete
+        for (const id of patch.complete) {
+            this.state.completedSteps.add(id);
+            this.state.activeSteps.delete(id);
+            this.state.pendingSteps.delete(id);
+            this.state.completedAt.set(id, currentEventTs);
+        }
+
+        // cancel
+        for (const id of patch.cancel) {
+            this.state.cancelledSteps.add(id);
+            this.state.activeSteps.delete(id);
+            this.state.pendingSteps.delete(id);
+        }
+
+        // timers
+        for (const t of patch.timers) {
+            this.scheduler.push(t);
+        }
+
+        // traces
+        for (const tr of patch.traces) {
+            this.trace.record(tr);
+        }
+    }
+
+    private flushTimers(currentEventTs: number): void {
+        while (true) {
+            const next = this.scheduler.peek();
+            if (!next || next.ts > currentEventTs) break;
+
+            const timer = this.scheduler.pop()!;
+
+            this.trace.record({
+                type: "TIMER_FIRED",
+                timestamp: currentEventTs,
+                meta: timer
+            });
+        }
+    }
+
+    public createContext(stepId: string, ts: number): EvalContext {
+        return {
+            factMap: this.factMap,
+            eventIndex: this.eventIndex,
+            activatedAt: this.state.activatedAt,
+            completedSteps: this.state.completedSteps,
+            currentStepId: stepId,
+            currentEventTs: ts,
+            lowerBound: this.lowerBound.bind(this)
+        };
+    }
+
 }
