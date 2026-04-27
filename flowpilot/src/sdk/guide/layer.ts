@@ -3,6 +3,7 @@
 import { FlowConfig } from "../types";
 
 export class TransitionLayer {
+    private static readonly SPOTLIGHT_TRANSITION = "clip-path 0.18s ease-out";
     private readonly overlay: HTMLDivElement;
     private readonly tooltip: HTMLDivElement;
     private readonly contentBox: HTMLDivElement;
@@ -23,14 +24,14 @@ export class TransitionLayer {
         Object.assign(this.overlay.style, {
             position: "fixed", inset: "0", zIndex: String(theme.zIndex - 1),
             background: theme.maskColor, pointerEvents: "none",
-            transition: "clip-path 0.25s ease-out", display: "none"
+            transition: "none", display: "none", willChange: "clip-path"
         });
 
         Object.assign(this.tooltip.style, {
             position: "fixed", top: "0px", left: "0px",
             zIndex: String(theme.zIndex), background: "#fff",
             padding: "16px", borderRadius: theme.borderRadius, display: "none",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.2)"
+            boxShadow: "0 10px 30px rgba(0,0,0,0.2)", willChange: "transform"
         });
 
         Object.assign(this.nextBtn.style, {
@@ -54,15 +55,23 @@ export class TransitionLayer {
         this.onNextClick = cb;
     }
 
-    public highlight(rect: DOMRect) {
+    public highlight(rect: DOMRect, options?: { animate?: boolean }) {
+        const left = Math.round(rect.left);
+        const top = Math.round(rect.top);
+        const right = Math.round(rect.right);
+        const bottom = Math.round(rect.bottom);
+
         this.overlay.style.display = "block";
+        this.overlay.style.transition = options?.animate
+            ? TransitionLayer.SPOTLIGHT_TRANSITION
+            : "none";
         this.overlay.style.clipPath = `polygon(
             0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
-            ${rect.left}px ${rect.top}px, 
-            ${rect.left}px ${rect.bottom}px, 
-            ${rect.right}px ${rect.bottom}px, 
-            ${rect.right}px ${rect.top}px, 
-            ${rect.left}px ${rect.top}px
+            ${left}px ${top}px, 
+            ${left}px ${bottom}px, 
+            ${right}px ${bottom}px, 
+            ${right}px ${top}px, 
+            ${left}px ${top}px
         )`;
     }
 
@@ -96,11 +105,21 @@ export class TransitionLayer {
             this.nextBtn.style.display = "none";
         }
 
-        this.tooltip.style.transform = `translate(${x}px, ${y}px)`;
+        const snappedX = Math.round(x);
+        const snappedY = Math.round(y);
+        this.tooltip.style.transform = `translate3d(${snappedX}px, ${snappedY}px, 0)`;
     }
 
     public hide() {
         this.overlay.style.display = "none";
         this.tooltip.style.display = "none";
+    }
+
+    public destroy() {
+        this.hide();
+        this.onNextClick = undefined;
+        this.nextBtn.onclick = null;
+        this.overlay.remove();
+        this.tooltip.remove();
     }
 }

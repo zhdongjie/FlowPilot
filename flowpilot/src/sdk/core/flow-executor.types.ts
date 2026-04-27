@@ -1,8 +1,8 @@
 // src/sdk/core/flow-executor.types.ts
 
 import { EvalContext, ParsedStep } from "../types";
-import { FlowState } from "./flow-state.ts";
-import {TimerEvent} from "./executor-events.ts";
+import { FlowState } from "./flow-state";
+import { TimerEvent } from "./executor-events";
 import {TraceEvent} from "../runtime/trace";
 
 export interface FlowExecutorDeps {

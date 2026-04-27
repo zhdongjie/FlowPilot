@@ -35,6 +35,15 @@ export interface FlowConfig {
     };
 }
 
+export interface FlowConfigOverride {
+    theme?: Partial<FlowConfig["theme"]>;
+    ui?: Partial<FlowConfig["ui"]>;
+    runtime?: Partial<Omit<FlowConfig["runtime"], "persistence" | "signalPrefix">> & {
+        persistence?: Partial<FlowConfig["runtime"]["persistence"]>;
+        signalPrefix?: Partial<FlowConfig["runtime"]["signalPrefix"]>;
+    };
+}
+
 export const DEFAULT_CONFIG: FlowConfig = {
     theme: {
         primaryColor: "#007aff",

@@ -104,6 +104,7 @@ export class PluginManager {
 
         this.plugins = [];
         this.initialized = new WeakSet();
+        this.eventBus.clear();
     }
 
     // =========================

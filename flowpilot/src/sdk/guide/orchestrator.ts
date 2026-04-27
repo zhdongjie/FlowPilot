@@ -45,6 +45,12 @@ export class GuideOrchestrator {
         this.renderer.hide();
     }
 
+    destroy() {
+        this.stop();
+        this.currentStepId = null;
+        this.renderer.destroy();
+    }
+
     /**
      * 独立的主循环，解耦 Engine 的判定频率
      */
@@ -82,6 +88,10 @@ export class GuideOrchestrator {
         // 确保在单页应用页面切换时，能够等到下一个按钮出现
         const el = await this.tracker.waitFor(step.ui.selector);
 
+        if (!this.running) {
+            return;
+        }
+
         if (!el) {
             // 如果超时未找到元素，隐藏引导以防错位
             this.renderer.hide();
@@ -90,7 +100,7 @@ export class GuideOrchestrator {
 
         // 4. 万事俱备，执行渲染
         this.currentStepId = nextId;
-        this.renderer.render(step, el, this.config);
+        this.renderer.render(step, el);
     }
 
     public getRenderer() {

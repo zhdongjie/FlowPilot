@@ -1,5 +1,6 @@
 // src/sdk/types/guide.ts
 
+import type { FlowConfigOverride } from "./config";
 import type { Step } from "./step";
 
 export interface GuideStepUI {
@@ -13,3 +14,18 @@ export interface GuideStepUI {
 export interface GuideStep extends Step {
     ui?: GuideStepUI;
 }
+
+export interface GuideDefinition {
+    id: string;
+    rootStepId: string;
+    steps: GuideStep[];
+    config?: FlowConfigOverride;
+}
+
+export type GuideDefinitionLoader =
+    () => GuideDefinition | Promise<GuideDefinition>;
+
+export type GuideSource =
+    | GuideDefinition
+    | Promise<GuideDefinition>
+    | GuideDefinitionLoader;

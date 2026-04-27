@@ -15,9 +15,10 @@ import type {
 import { FlowParser } from "../compiler/parser";
 import { ConditionCompiler } from "../compiler/condition";
 import { TimerScheduler } from "../runtime/scheduler";
-import { FlowState } from "./flow-state.ts";
-import { FlowExecutor } from "./flow-executor.ts";
-import { StatePatch } from "./flow-executor.types.ts";
+import { FlowState } from "./flow-state";
+import { FlowExecutor } from "./flow-executor";
+import { StatePatch } from "./flow-executor.types";
+import { cloneStepSnapshot } from "../runtime/step-snapshot";
 
 export interface IndexedEvent {
     ts: number;
@@ -560,10 +561,17 @@ export class FlowEngine {
         });
     }
 
-    private replay(events: Signal[], settleTs: number = Date.now()) {
+    private replay(
+        events: Signal[],
+        settleTs: number = Date.now(),
+        options?: {
+            bootstrap?: (engine: FlowEngine) => void;
+        }
+    ) {
         const originalCallback = this.onStateChange;
         this.onStateChange = undefined;
         this.resetState(0);
+        options?.bootstrap?.(this);
         const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
         for (const e of sorted) {
             // 纯净状态下手动推进，不触发无用副作用
@@ -580,7 +588,12 @@ export class FlowEngine {
      * 底层能力：回溯到指定的绝对时间点
      * 语义：抹除 targetTs 之后发生的所有“未来事件”
      */
-    revertToTime(targetTs: number) {
+    revertToTime(
+        targetTs: number,
+        options?: {
+            bootstrap?: (engine: FlowEngine) => void;
+        }
+    ) {
         // 1. 筛选出目标时间点之前的有效信号
         const events = [...this.store.getEvents()];
         const validEvents = events.filter(e => e.timestamp <= targetTs);
@@ -598,7 +611,7 @@ export class FlowEngine {
         // 4. 🌟 底层状态机静默读档！(必须静音，否则 replay 会产生海量重复日志)
         this.store.clear();
         this.trace.raw().mute();   // 开启静音
-        this.replay(validEvents, targetTs);
+        this.replay(validEvents, targetTs, options);
         this.trace.raw().unmute(); // 读档完毕，解除静音
     }
 
@@ -613,7 +626,7 @@ export class FlowEngine {
         this.revertToTime(targetTs);
     }
 
-    public forceComplete(stepId: string) {
+    public forceComplete(stepId: string, completedAtTs: number = Date.now()) {
         // 1. 使用 O(1) 的 Map 查找，而不是数组 find
         const step = this.stepsMap.get(stepId);
 
@@ -626,7 +639,7 @@ export class FlowEngine {
             this.state.pendingSteps.delete(stepId);
 
             // 4. 记录完成时间（恢复现场时的基准时间）
-            this.state.completedAt.set(stepId, Date.now());
+            this.state.completedAt.set(stepId, completedAtTs);
 
             // Resume from persistence should continue the flow, not collapse it.
             for (const nextId of step.next ?? []) {
@@ -643,7 +656,7 @@ export class FlowEngine {
 
             this.trace.record({
                 type: "STEP_COMPLETE",
-                timestamp: Date.now(),
+                timestamp: completedAtTs,
                 stepId: stepId,
                 meta: {
                     toStep: step.next?.join(','),
@@ -655,19 +668,23 @@ export class FlowEngine {
         }
     }
 
+    public applyPersistenceBaseline(stepIds: string[], restoredAtTs: number) {
+        if (stepIds.length === 0) return;
+
+        for (const stepId of stepIds) {
+            this.forceComplete(stepId, restoredAtTs);
+        }
+
+        this.tick(restoredAtTs);
+    }
+
     public getTraceStore() {
         return this.trace.raw();
     }
 
     /** 👉 暴露当前引擎实例的原始配置 (供影子引擎克隆) */
     private createSerializableStepSnapshot(step: ParsedStep): Step {
-        return structuredClone({
-            id: step.id,
-            when: step.when,
-            next: step.next ? [...step.next] : undefined,
-            enterWhen: step.enterWhen,
-            cancelWhen: step.cancelWhen
-        } satisfies Step);
+        return cloneStepSnapshot(step);
     }
 
     public getConfigSnap() {

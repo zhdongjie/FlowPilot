@@ -16,6 +16,9 @@ export class FlowRuntime {
 
     private readonly pluginManager = new PluginManager();
     private hasReportedFlowFinish = false;
+    private isDestroyed = false;
+    private persistedCompletedIds: string[] = [];
+    private persistedRestoredAtTs: number | null = null;
 
     constructor(options: { steps: Step[], rootStepId: string, config: FlowConfig, plugins?: FlowPlugin[] }) {
         this.engine = new FlowEngine(options.steps, options.rootStepId, { mode: "runtime"});
@@ -66,6 +69,10 @@ export class FlowRuntime {
         return this.engine.getActiveSteps().length === 0 &&
             this.engine.getPendingSteps().length === 0 &&
             this.engine.getCompletedSteps().length > 0;
+    }
+
+    public isFinished() {
+        return this.isFlowFinished();
     }
 
     private bindEngineStateChange() {
@@ -140,7 +147,11 @@ export class FlowRuntime {
             if (this.engine.getActiveSteps().includes(next.stepId)) {
                 this.engine.tick(next.ts);
             }
+
+            if (this.isDestroyed) return;
         }
+
+        if (this.isDestroyed) return;
 
         this.scheduleNext();
         this.saveProgress();
@@ -152,6 +163,12 @@ export class FlowRuntime {
 
     public start() {
         const { persistence } = this.config.runtime;
+        const startTs = Date.now();
+        let restoredFromPersistence = false;
+
+        this.isDestroyed = false;
+        this.persistedCompletedIds = [];
+        this.persistedRestoredAtTs = null;
 
         // 🌟 恢复历史进度
         if (persistence.enabled) {
@@ -160,10 +177,10 @@ export class FlowRuntime {
             if (saved) {
                 try {
                     const completedIds: string[] = JSON.parse(saved);
-
-                    completedIds.forEach(id => {
-                        this.engine.forceComplete(id);
-                    });
+                    this.persistedCompletedIds = [...completedIds];
+                    this.persistedRestoredAtTs = startTs;
+                    this.engine.applyPersistenceBaseline(completedIds, startTs);
+                    restoredFromPersistence = completedIds.length > 0;
 
                 } catch {
                     localStorage.removeItem(persistence.key);
@@ -171,7 +188,9 @@ export class FlowRuntime {
             }
         }
 
-        this.engine.tick(Date.now());
+        if (!restoredFromPersistence) {
+            this.engine.tick(startTs);
+        }
         this.scheduleNext();
         this.syncFlowCompletionState();
 
@@ -190,11 +209,25 @@ export class FlowRuntime {
         this.pluginManager.emitHook("onStop");
     }
 
+    public destroy(options?: { clearCache?: boolean }) {
+        this.isDestroyed = true;
+        this.stop();
+
+        if (options?.clearCache) {
+            this.clearCache();
+        }
+
+        this.engine.onStateChange = undefined;
+        this.pluginManager.destroy();
+        this.stateEmitter.clear();
+    }
+
     // =========================
     // 📡 信号入口（唯一入口）
     // =========================
 
     public dispatch(signal: Signal) {
+        if (this.isDestroyed) return;
         // 通过插件链过滤信号
         const shouldPass = this.pluginManager.emitSignal(signal);
 
@@ -205,6 +238,8 @@ export class FlowRuntime {
 
         // 放行，进入核心引擎
         this.engine.ingest(signal);
+
+        if (this.isDestroyed) return;
 
         this.scheduleNext();
         this.saveProgress();
@@ -218,6 +253,18 @@ export class FlowRuntime {
     // =========================
 
     public revert(stepId: string) {
+        const traceLogs = this.engine.getTraceStore().all();
+        const completeEvent = [...traceLogs].reverse().find(
+            (event: any) =>
+                event.type === "STEP_COMPLETE" &&
+                event.stepId === stepId
+        );
+
+        if (completeEvent) {
+            this.revertToTime(completeEvent.timestamp);
+            return;
+        }
+
         this.engine.revert(stepId);
 
         this.scheduleNext();
@@ -228,7 +275,21 @@ export class FlowRuntime {
     }
 
     public revertToTime(targetTs: number) {
-        this.engine.revertToTime(targetTs);
+        const shouldRestorePersistenceBaseline =
+            this.persistedRestoredAtTs !== null &&
+            targetTs >= this.persistedRestoredAtTs;
+
+        this.engine.revertToTime(targetTs, shouldRestorePersistenceBaseline
+            ? {
+                bootstrap: (engine) => {
+                    engine.applyPersistenceBaseline(
+                        this.persistedCompletedIds,
+                        this.persistedRestoredAtTs!
+                    );
+                }
+            }
+            : undefined
+        );
 
         this.scheduleNext();
 
@@ -277,6 +338,8 @@ export class FlowRuntime {
     public clearCache() {
         const { persistence } = this.config.runtime;
         this.hasReportedFlowFinish = false;
+        this.persistedCompletedIds = [];
+        this.persistedRestoredAtTs = null;
 
         if (!persistence.enabled) return;
 

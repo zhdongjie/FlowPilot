@@ -1,6 +1,6 @@
 // src/sdk/devtools/dag/builder.ts
 
-import { Graph, GraphEdge, GraphNode } from "./types.ts";
+import { Graph, GraphEdge, GraphNode } from "./types";
 
 export function buildGraph(diagnosticRoot: any, stepId?: string): Graph {
     const nodes: GraphNode[] = [];

@@ -277,4 +277,68 @@ describe("Runtime Layer", () => {
         expect(runtime2.activeSteps).not.toContain("B");
         expect(localStorage.getItem(`${storageKey}_finished`)).toBe("true");
     });
+
+    it("should rebuild a gated timer only after re-entering a restored pending step following revert", () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(1000);
+
+        const steps: Step[] = [
+            {
+                id: "A",
+                when: { type: "event", key: "start" },
+                next: ["B"]
+            },
+            {
+                id: "B",
+                enterWhen: { type: "event", key: "ready" },
+                when: { type: "event", key: "pay" },
+                cancelWhen: "!pay within(2000)"
+            }
+        ];
+
+        const storageKey = "flowpilot_runtime_enterwhen_revert_timer";
+
+        const runtime1 = trackRuntime(new FlowRuntime({
+            steps,
+            rootStepId: "A",
+            config: createRuntimeConfig(storageKey)
+        }));
+        runtime1.start();
+        runtime1.dispatch(sig("start", Date.now()));
+        runtime1.stop();
+
+        const runtime2 = trackRuntime(new FlowRuntime({
+            steps,
+            rootStepId: "A",
+            config: createRuntimeConfig(storageKey)
+        }));
+        runtime2.start();
+
+        expect(runtime2.debug().pendingSteps).toContain("B");
+        expect(runtime2.activeSteps).not.toContain("B");
+
+        vi.advanceTimersByTime(500);
+        runtime2.dispatch(sig("ready", Date.now()));
+        expect(runtime2.activeSteps).toContain("B");
+
+        vi.advanceTimersByTime(1000);
+        runtime2.revertToTime(1200);
+
+        expect(runtime2.debug().pendingSteps).toContain("B");
+        expect(runtime2.activeSteps).not.toContain("B");
+
+        vi.advanceTimersByTime(3000);
+        expect(runtime2.debug().pendingSteps).toContain("B");
+        expect(runtime2.activeSteps).not.toContain("B");
+
+        runtime2.dispatch(sig("ready", Date.now()));
+        expect(runtime2.activeSteps).toContain("B");
+
+        vi.advanceTimersByTime(2100);
+        expect(runtime2.activeSteps).not.toContain("B");
+
+        const trace = runtime2.debug().trace;
+        const lastTrace = trace[trace.length - 1];
+        expect(lastTrace.meta?.reason).toBe("CANCELLED_BY_CONDITION");
+    });
 });

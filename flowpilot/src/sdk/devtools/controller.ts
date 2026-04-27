@@ -2,7 +2,7 @@
 import type { FlowRuntime } from "../runtime/runtime";
 import { DevToolsStore } from "./store";
 import { EventEmitter } from "../utils/emitter";
-import { FlowEngine } from "../core/engine.ts";
+import { FlowEngine } from "../core/engine";
 import { FlowReplayer } from "../runtime/replay";
 
 export class FlowDevTools {

@@ -1,7 +1,7 @@
 // src/sdk/core/flow-executor.ts
 
-import {FlowExecutorDeps, StatePatch} from "./flow-executor.types.ts";
-import {FlowState} from "./flow-state.ts";
+import { FlowExecutorDeps, StatePatch } from "./flow-executor.types";
+import { FlowState } from "./flow-state";
 
 export class FlowExecutor {
 

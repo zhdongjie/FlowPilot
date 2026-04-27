@@ -4,6 +4,7 @@ import { FlowEngine } from "../core/engine";
 import { TraceStore } from "./trace";
 import type { Step, Signal } from "../types";
 import type { TraceMode } from "./trace";
+import { cloneStepSnapshots } from "./step-snapshot";
 
 export interface ReplayResult {
     engine: FlowEngine;
@@ -15,18 +16,6 @@ export interface ReplayResult {
 }
 
 export class FlowReplayer {
-    private static createSerializableSteps(steps: Step[]): Step[] {
-        return structuredClone(
-            steps.map(step => ({
-                id: step.id,
-                when: step.when,
-                next: step.next ? [...step.next] : undefined,
-                enterWhen: step.enterWhen,
-                cancelWhen: step.cancelWhen
-            } satisfies Step))
-        );
-    }
-
     static replay(
         steps: Step[],
         signals: Signal[],
@@ -35,7 +24,7 @@ export class FlowReplayer {
             mode?: TraceMode;
         }
     ): ReplayResult {
-        const engine = new FlowEngine(this.createSerializableSteps(steps), rootStepId, {
+        const engine = new FlowEngine(cloneStepSnapshots(steps), rootStepId, {
             mode: options?.mode ?? "replay"
         });
         const traceScope = engine.getTrace();

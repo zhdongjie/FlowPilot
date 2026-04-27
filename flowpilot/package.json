@@ -3,17 +3,31 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "main": "./dist/flowpilot.umd.js",
+  "module": "./dist/flowpilot.esm.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/flowpilot.esm.js",
+      "require": "./dist/flowpilot.umd.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "tsc --watch",
-    "build": "tsc",
+    "typecheck": "tsc",
+    "build": "node ./scripts/build-sdk.mjs",
+    "build:min": "node ./scripts/build-sdk.mjs --minify",
+    "build:all": "node ./scripts/build-sdk.mjs && node ./scripts/build-sdk.mjs --minify",
     "test": "vitest"
-  },
-  "dependencies": {
-
   },
   "devDependencies": {
     "@types/node": "^24.12.2",
     "jsdom": "^29.0.2",
+    "terser": "^5.46.2",
     "typescript": "~6.0.2",
     "vite": "^8.0.4",
     "vitest": "^4.1.4"

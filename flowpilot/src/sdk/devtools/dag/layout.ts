@@ -1,5 +1,5 @@
 import type { Graph, GraphNode } from "./types";
-import {LayoutResult} from "./layout-types.ts";
+import { LayoutResult } from "./layout-types";
 
 /**
  * 🌟 工业级 DAG 布局算法

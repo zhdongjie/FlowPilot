@@ -1,0 +1,78 @@
+{
+  "id": "guide.open-account",
+  "rootStepId": "step_login",
+  "steps": [
+    {
+      "id": "step_login",
+      "when": "focus_login_btn && login_success",
+      "next": ["step_dashboard"],
+      "ui": {
+        "selector": "#login-btn",
+        "content": "第一步：先点击登录，进入开卡工作台。",
+        "position": "bottom"
+      }
+    },
+    {
+      "id": "step_dashboard",
+      "when": "click_open_account_btn",
+      "next": ["step_form_overview"],
+      "ui": {
+        "selector": "[data-fp='open_account_btn']",
+        "content": "登录成功后，点击这里进入开户申请。",
+        "position": "right"
+      }
+    },
+    {
+      "id": "step_form_overview",
+      "when": "click_next_step_form_overview",
+      "next": ["step_field_name"],
+      "ui": {
+        "selector": "#account-form",
+        "content": "这是开户表单，先整体看一眼，再开始逐项填写。",
+        "nextLabel": "开始填写",
+        "position": "top"
+      }
+    },
+    {
+      "id": "step_field_name",
+      "when": "blur_user_name",
+      "next": ["step_field_id"],
+      "ui": {
+        "selector": "[data-fp='user_name']",
+        "content": "先填写真实姓名，便于后续实名校验。",
+        "position": "right"
+      }
+    },
+    {
+      "id": "step_field_id",
+      "when": "blur_id_card",
+      "next": ["step_submit_form"],
+      "ui": {
+        "selector": "[data-fp='id_card']",
+        "content": "继续补充身份证号，完成身份信息录入。",
+        "position": "right"
+      }
+    },
+    {
+      "id": "step_submit_form",
+      "when": "click_submit_btn",
+      "next": ["step_finish"],
+      "cancelWhen": "!click_submit_btn within(10000)",
+      "ui": {
+        "selector": "#submit-btn",
+        "content": "确认信息无误后，点击这里提交开户申请。",
+        "position": "bottom"
+      }
+    },
+    {
+      "id": "step_finish",
+      "enterWhen": "submit_success",
+      "when": "timer(3000)",
+      "ui": {
+        "selector": "[data-fp='account_success_card']",
+        "content": "开户资料已经提交成功，接下来只需要等待审核结果。",
+        "position": "top"
+      }
+    }
+  ]
+}

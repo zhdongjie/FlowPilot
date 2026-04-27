@@ -1,27 +1,24 @@
-// src/sdk/guide/controller.ts
 import { FlowRuntime } from "../runtime/runtime";
 import { GuideOrchestrator } from "./orchestrator";
 import type { FlowPlugin, GuideStep } from "../types";
 import { FlowParser } from "../compiler/parser";
-import { FlowConfig, DEFAULT_CONFIG } from "../types";
+import { FlowConfig, FlowConfigOverride, DEFAULT_CONFIG } from "../types";
 
 export class GuideController {
-    public readonly runtime: FlowRuntime
+    public readonly runtime: FlowRuntime;
+    public readonly guideId: string;
     private readonly orchestrator: GuideOrchestrator;
     public readonly config: FlowConfig;
 
     constructor(options: {
+        guideId?: string;
         steps: GuideStep[];
         rootStepId: string;
-        config?: Partial<FlowConfig>;
+        config?: FlowConfigOverride;
         plugins?: FlowPlugin[];
     }) {
-        this.config = {
-            ...DEFAULT_CONFIG,
-            ...options.config,
-            ui: { ...DEFAULT_CONFIG.ui, ...options.config?.ui },
-            runtime: { ...DEFAULT_CONFIG.runtime, ...options.config?.runtime }
-        };
+        this.guideId = options.guideId ?? options.rootStepId;
+        this.config = this.resolveConfig(this.guideId, options.config);
 
         const compiledSteps = this.compileSteps(options.steps);
 
@@ -32,19 +29,46 @@ export class GuideController {
             plugins: options.plugins
         });
 
-
         this.orchestrator = new GuideOrchestrator(this.runtime, compiledSteps, this.config);
 
         this.bindInternalSignals();
+    }
+
+    private resolveConfig(guideId: string, config?: FlowConfigOverride): FlowConfig {
+        const merged: FlowConfig = {
+            ...DEFAULT_CONFIG,
+            ...config,
+            theme: { ...DEFAULT_CONFIG.theme, ...config?.theme },
+            ui: { ...DEFAULT_CONFIG.ui, ...config?.ui },
+            runtime: {
+                ...DEFAULT_CONFIG.runtime,
+                ...config?.runtime,
+                persistence: {
+                    ...DEFAULT_CONFIG.runtime.persistence,
+                    ...config?.runtime?.persistence
+                },
+                signalPrefix: {
+                    ...DEFAULT_CONFIG.runtime.signalPrefix,
+                    ...config?.runtime?.signalPrefix
+                }
+            }
+        };
+
+        const hasExplicitPersistenceKey = Boolean(config?.runtime?.persistence?.key);
+        if (!hasExplicitPersistenceKey && merged.runtime.persistence.enabled) {
+            merged.runtime.persistence.key = `flowpilot:${guideId}`;
+        }
+
+        return merged;
     }
 
     private compileSteps(steps: GuideStep[]) {
         return steps.map(step => {
             const parsed = { ...step };
             const p = FlowParser;
-            if (typeof parsed.when === 'string') parsed.when = p.parse(parsed.when);
-            if (typeof parsed.enterWhen === 'string') parsed.enterWhen = p.parse(parsed.enterWhen);
-            if (typeof parsed.cancelWhen === 'string') parsed.cancelWhen = p.parse(parsed.cancelWhen);
+            if (typeof parsed.when === "string") parsed.when = p.parse(parsed.when);
+            if (typeof parsed.enterWhen === "string") parsed.enterWhen = p.parse(parsed.enterWhen);
+            if (typeof parsed.cancelWhen === "string") parsed.cancelWhen = p.parse(parsed.cancelWhen);
             return parsed;
         });
     }
@@ -66,21 +90,16 @@ export class GuideController {
     public start() {
         const { persistence } = this.config.runtime;
 
-        // 1. 最高优先级的拦截：检查是否已经全剧终
         if (persistence.enabled) {
-            // 我们约定：全剧终的标记键名是配置 key 加上 '_finished'
             const isFinished = localStorage.getItem(`${persistence.key}_finished`);
-            if (isFinished === 'true') {
+            if (isFinished === "true") {
                 return;
             }
         }
 
         this.runtime.start();
-
-        // 2. 正常启动流程
         this.orchestrator.start();
 
-        // 3. 发射初始脉冲
         if (this.config.runtime.autoStart && this.runtime.activeSteps.length === 0) {
             this.runtime.dispatch({
                 id: `init_${Date.now()}`,
@@ -93,5 +112,14 @@ export class GuideController {
     public stop() {
         this.orchestrator.stop();
         this.runtime.stop();
+    }
+
+    public isFinished() {
+        return this.runtime.isFinished();
+    }
+
+    public destroy(options?: { clearCache?: boolean }) {
+        this.orchestrator.destroy();
+        this.runtime.destroy(options);
     }
 }

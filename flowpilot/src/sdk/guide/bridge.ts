@@ -6,13 +6,11 @@ export class GuideBridge {
     private readonly renderer: GuideRenderer;
     private readonly runtime: FlowRuntime;
     private readonly steps: GuideStep[];
-    private readonly config: FlowConfig;
 
     constructor(runtime: FlowRuntime, steps: GuideStep[], config: FlowConfig) {
         this.runtime = runtime;
         this.steps = steps;
-        this.renderer = new GuideRenderer(config)
-        this.config = config
+        this.renderer = new GuideRenderer(config);
     }
 
     mount() {
@@ -38,7 +36,7 @@ export class GuideBridge {
             const targetElement = document.querySelector(step.ui.selector) as HTMLElement;
 
             if (targetElement) {
-                this.renderer.render(step, targetElement, this.config);
+                this.renderer.render(step, targetElement);
             } else {
                 // 如果没找到元素（可能还没渲染出来），则暂时隐藏
                 this.renderer.hide();

@@ -23,12 +23,15 @@ export { DOMPlugin } from "./plugins/dom";
 // ==========================================
 export type {
     GuideStep,
+    GuideDefinition,
+    GuideSource,
     FlowConfig,
+    FlowConfigOverride,
     Step,
     Condition,
     Signal
 } from './types'
-export { PluginPresets } from './plugins/presets.ts'
+export { PluginPresets } from './plugins/presets'
 
 // ==========================================
 // 4. 工厂函数
@@ -44,5 +47,25 @@ export { PluginPresets } from './plugins/presets.ts'
 // ==========================================
 // 5. 工厂函数 (提供极简接入)
 // ==========================================
-export { createFlowPilot } from './guide/factory';
-export type { FlowPilotOptions } from './guide/factory';
+export {
+    createFlowPilot,
+    createFlowPilotFromDefinition,
+    createFlowPilotAsync
+} from './guide/factory';
+export type {
+    FlowPilotOptions,
+    FlowPilotDefinitionOptions,
+    FlowPilotAsyncOptions
+} from './guide/factory';
+export { GuideSessionManager } from './guide/session-manager';
+export type {
+    GuideSessionLifecycleOptions,
+    GuideSessionOpenOptions
+} from './guide/session-manager';
+export { createGuideRegistryService } from './guide/registry-service';
+export type {
+    GuideRegistryEntry,
+    GuideRegistryOpenOptions,
+    GuideRegistryService,
+    GuideRegistryServiceOptions
+} from './guide/registry-service';

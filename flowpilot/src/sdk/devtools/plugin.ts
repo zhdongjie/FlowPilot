@@ -5,18 +5,28 @@ import { FlowDevTools } from "./controller";
 import { FlowDevToolsPanel } from "./viewer/panel";
 
 export function DevToolsPlugin(): FlowPlugin {
+    let devtools: FlowDevTools | null = null;
+    let panel: FlowDevToolsPanel | null = null;
+
     return {
         name: "fp-devtools",
         setup(ctx) {
-            const devtools = new FlowDevTools();
+            devtools = new FlowDevTools();
             devtools.connect(ctx.runtime);
 
-            const panel = new FlowDevToolsPanel({
+            panel = new FlowDevToolsPanel({
                 devtools,
                 runtime: ctx.runtime
             });
 
             panel.mount();
+        },
+        onDispose() {
+            panel?.unmount();
+            panel = null;
+
+            devtools?.disconnect();
+            devtools = null;
         }
     };
 }
