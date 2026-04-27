@@ -136,6 +136,11 @@ const definition: GuideDefinition = {
 - `ui.position`
 - `ui.nextLabel`
 
+当前还有两个细节：
+
+- `ui.nextLabel === true` 时，会使用 `config.ui.defaultNextLabel`
+- `ui.title` 虽然已经存在于类型定义里，但当前 renderer 还没有真正渲染它
+
 ## 三种配置来源
 
 ### 1. 静态 TypeScript
@@ -298,3 +303,9 @@ const controller = createFlowPilotFromDefinition({
 正式发布前，建议先看：
 
 - [`./RELEASE.md`](./RELEASE.md)
+
+## 进阶文档
+
+- [Public API](../docs/08%20-%20Public%20API.md)
+- [Plugin System](../docs/09%20-%20Plugin%20System.md)
+- [Runtime Contracts](../docs/10%20-%20Runtime%20Contracts.md)
