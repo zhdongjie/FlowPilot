@@ -333,11 +333,6 @@ export class FlowEngine {
         // 5. completion check
         // =========================
         if (this.isFlowCompleted()) {
-            this.trace.record({
-                type: "REPLAY_END",
-                timestamp: currentEventTs
-            });
-
             this.onStateChange?.();
             this.stop();
             return;
@@ -565,7 +560,7 @@ export class FlowEngine {
         });
     }
 
-    private replay(events: Signal[]) {
+    private replay(events: Signal[], settleTs: number = Date.now()) {
         const originalCallback = this.onStateChange;
         this.onStateChange = undefined;
         this.resetState(0);
@@ -578,7 +573,7 @@ export class FlowEngine {
         }
         // 历史重放完毕：恢复广播，并强制做最后一次对齐到真实世界的时间
         this.onStateChange = originalCallback;
-        this.evaluateLoop(Date.now());
+        this.evaluateLoop(settleTs);
     }
 
     /**
@@ -603,7 +598,7 @@ export class FlowEngine {
         // 4. 🌟 底层状态机静默读档！(必须静音，否则 replay 会产生海量重复日志)
         this.store.clear();
         this.trace.raw().mute();   // 开启静音
-        this.replay(validEvents);
+        this.replay(validEvents, targetTs);
         this.trace.raw().unmute(); // 读档完毕，解除静音
     }
 
@@ -665,10 +660,22 @@ export class FlowEngine {
     }
 
     /** 👉 暴露当前引擎实例的原始配置 (供影子引擎克隆) */
+    private createSerializableStepSnapshot(step: ParsedStep): Step {
+        return structuredClone({
+            id: step.id,
+            when: step.when,
+            next: step.next ? [...step.next] : undefined,
+            enterWhen: step.enterWhen,
+            cancelWhen: step.cancelWhen
+        } satisfies Step);
+    }
+
     public getConfigSnap() {
         return {
             // 你之前传入 constructor 的步骤
-            steps: Array.from(this.stepsMap.values()),
+            steps: Array.from(this.stepsMap.values()).map(step =>
+                this.createSerializableStepSnapshot(step)
+            ),
             rootStepId: this.rootStepId
         };
     }

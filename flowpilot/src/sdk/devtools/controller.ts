@@ -3,6 +3,7 @@ import type { FlowRuntime } from "../runtime/runtime";
 import { DevToolsStore } from "./store";
 import { EventEmitter } from "../utils/emitter";
 import { FlowEngine } from "../core/engine.ts";
+import { FlowReplayer } from "../runtime/replay";
 
 export class FlowDevTools {
     private readonly store = new DevToolsStore();
@@ -31,7 +32,8 @@ export class FlowDevTools {
 
     /**
      * Keep the timeline in sync from real trace data, then rebuild a shadow
-     * engine from real signals so DAG diagnostics stay trustworthy.
+     * engine through the shared replay path so DevTools has a single
+     * authoritative reconstruction chain.
      */
     private syncFromRealWorld(runtime: FlowRuntime) {
         const traceHistory = runtime.getTraceStream().all();
@@ -39,18 +41,17 @@ export class FlowDevTools {
         traceHistory.forEach(event => this.store.push(event));
 
         const { steps, rootStepId } = runtime.getEngineConfig();
-        const shadowEngine = new FlowEngine(steps, rootStepId, {
-            mode: "devtools"
-        });
-
         const realSignals = [...runtime.getSignals()]
             .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
 
-        for (const signal of realSignals) {
-            shadowEngine.ingest(signal);
-        }
-
+        const { engine: shadowEngine } = FlowReplayer.replay(
+            steps,
+            realSignals,
+            rootStepId,
+            { mode: "devtools" }
+        );
         shadowEngine.tick(Date.now());
+        shadowEngine.stop();
 
         this.debugEngine?.stop();
         this.debugEngine = shadowEngine;

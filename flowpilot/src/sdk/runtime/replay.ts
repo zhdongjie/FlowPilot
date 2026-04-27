@@ -3,6 +3,7 @@
 import { FlowEngine } from "../core/engine";
 import { TraceStore } from "./trace";
 import type { Step, Signal } from "../types";
+import type { TraceMode } from "./trace";
 
 export interface ReplayResult {
     engine: FlowEngine;
@@ -14,12 +15,29 @@ export interface ReplayResult {
 }
 
 export class FlowReplayer {
+    private static createSerializableSteps(steps: Step[]): Step[] {
+        return structuredClone(
+            steps.map(step => ({
+                id: step.id,
+                when: step.when,
+                next: step.next ? [...step.next] : undefined,
+                enterWhen: step.enterWhen,
+                cancelWhen: step.cancelWhen
+            } satisfies Step))
+        );
+    }
+
     static replay(
         steps: Step[],
         signals: Signal[],
-        rootStepId: string
+        rootStepId: string,
+        options?: {
+            mode?: TraceMode;
+        }
     ): ReplayResult {
-        const engine = new FlowEngine(structuredClone(steps), rootStepId, { mode: "replay"});
+        const engine = new FlowEngine(this.createSerializableSteps(steps), rootStepId, {
+            mode: options?.mode ?? "replay"
+        });
         const traceScope = engine.getTrace();
 
         const sorted = [...signals].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
@@ -30,17 +48,6 @@ export class FlowReplayer {
         });
 
         for (const signal of sorted) {
-            traceScope.record({
-                type: "SIGNAL_INGEST",
-                timestamp: signal.timestamp,
-                signalId: signal.id,
-                meta: {
-                    key: signal.key,
-                    // 👉 适配：记录当前所有的活跃步骤 ID
-                    activeSteps: engine.getActiveSteps()
-                }
-            });
-
             engine.ingest(signal);
         }
 
@@ -50,7 +57,7 @@ export class FlowReplayer {
         });
 
         return {
-            engine: engine,
+            engine,
             trace: traceScope.raw(),
             state: {
                 activeSteps: engine.getActiveSteps(),

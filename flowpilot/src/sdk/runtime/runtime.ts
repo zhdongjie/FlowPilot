@@ -15,6 +15,7 @@ export class FlowRuntime {
     private readonly stateEmitter = new EventEmitter<void>();
 
     private readonly pluginManager = new PluginManager();
+    private hasReportedFlowFinish = false;
 
     constructor(options: { steps: Step[], rootStepId: string, config: FlowConfig, plugins?: FlowPlugin[] }) {
         this.engine = new FlowEngine(options.steps, options.rootStepId, { mode: "runtime"});
@@ -32,10 +33,7 @@ export class FlowRuntime {
         this.pluginManager.setup(this.pluginManager["ctx"]);
 
         // 4.监听引擎状态变化
-        this.engine.onStateChange ??= () => {
-            this.stateEmitter.emit();
-            this.pluginManager.emitHook("onRender");
-        };
+        this.bindEngineStateChange();
     }
 
     /**
@@ -54,9 +52,7 @@ export class FlowRuntime {
             getState: () => ({
                 activeSteps: this.engine.getActiveSteps(),
                 completedSteps: this.engine.getCompletedSteps(),
-                isFinished: this.engine.getActiveSteps().length === 0 &&
-                    this.engine.getPendingSteps().length === 0 &&
-                    this.engine.getCompletedSteps().length > 0
+                isFinished: this.isFlowFinished()
             }),
             now: () => Date.now(),
 
@@ -64,6 +60,47 @@ export class FlowRuntime {
             emit: (event, payload) => this.pluginManager.emitEvent(event, payload),
             on: (event, cb) => this.pluginManager.onEvent(event, cb)
         });
+    }
+
+    private isFlowFinished() {
+        return this.engine.getActiveSteps().length === 0 &&
+            this.engine.getPendingSteps().length === 0 &&
+            this.engine.getCompletedSteps().length > 0;
+    }
+
+    private bindEngineStateChange() {
+        this.engine.onStateChange = () => {
+            this.handleEngineStateChange();
+        };
+    }
+
+    private handleEngineStateChange() {
+        this.syncFlowCompletionState();
+        this.stateEmitter.emit();
+        this.pluginManager.emitHook("onRender");
+    }
+
+    private syncFlowCompletionState() {
+        const { persistence } = this.config.runtime;
+        const isFinished = this.isFlowFinished();
+
+        if (!isFinished) {
+            this.hasReportedFlowFinish = false;
+
+            if (persistence.enabled) {
+                localStorage.removeItem(`${persistence.key}_finished`);
+            }
+            return;
+        }
+
+        if (persistence.enabled) {
+            localStorage.setItem(`${persistence.key}_finished`, "true");
+        }
+
+        if (!this.hasReportedFlowFinish) {
+            this.hasReportedFlowFinish = true;
+            this.pluginManager.emitHook("onFlowComplete");
+        }
     }
 
     // =========================
@@ -136,6 +173,7 @@ export class FlowRuntime {
 
         this.engine.tick(Date.now());
         this.scheduleNext();
+        this.syncFlowCompletionState();
 
         // 🌟 首次广播
         this.stateEmitter.emit();
@@ -183,7 +221,10 @@ export class FlowRuntime {
         this.engine.revert(stepId);
 
         this.scheduleNext();
+        this.saveProgress();
+        this.syncFlowCompletionState();
         this.stateEmitter.emit();
+        this.pluginManager.emitHook("onRender");
     }
 
     public revertToTime(targetTs: number) {
@@ -192,6 +233,7 @@ export class FlowRuntime {
         this.scheduleNext();
 
         this.saveProgress();
+        this.syncFlowCompletionState();
 
         this.stateEmitter.emit();
 
@@ -234,6 +276,7 @@ export class FlowRuntime {
 
     public clearCache() {
         const { persistence } = this.config.runtime;
+        this.hasReportedFlowFinish = false;
 
         if (!persistence.enabled) return;
 
@@ -250,12 +293,8 @@ export class FlowRuntime {
         const { steps, rootStepId } = this.engine.getConfigSnap();
         this.engine.stop();
 
-        this.engine = new FlowEngine(steps, rootStepId);
-
-        this.engine.onStateChange = () => {
-            this.stateEmitter.emit();
-            this.pluginManager.emitHook("onRender");
-        };
+        this.engine = new FlowEngine(steps, rootStepId, { mode: "runtime" });
+        this.bindEngineStateChange();
 
         this.initPluginContext();
 
